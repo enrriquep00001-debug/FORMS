@@ -1,0 +1,1831 @@
+<script>
+var SESION = { user:"", nombre:"", rol:"", territorioActivo:true };
+var _MODO = "nuevo"; // "nuevo" | "editar"
+var pasoActual = 1;
+var totalPasos = 6;
+var boolValues = {
+  hablaLengua:null,
+  poblacionIndigena:null,
+  poblacionAfro:null,
+  tieneDiscapacidad:null,
+  danoEstructural:null,
+  danoNatural:null,
+  zonaRiesgo:null,
+  tienePredio:null,
+  condicionesConstruccion:null
+};
+
+/* ── LOGIN ── */
+function login() {
+  var u = document.getElementById("usuario").value.trim();
+  var p = document.getElementById("password").value;
+  var e = document.getElementById("loginError");
+  if (!u||!p){e.innerText="Ingresa usuario y contraseña";return;}
+  e.innerText="Ingresando...";
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res&&res.status){
+        SESION.user=res.user;SESION.nombre=res.nombre;SESION.rol=res.rol;
+        SESION.territorioActivo=(res.rol==="admin") ? true : (res.territorioActivo===true);
+        document.getElementById("login-wrap").style.display="none";
+        document.getElementById("app-wrap").style.display="block";
+        document.getElementById("topbar-usuario").innerText=SESION.nombre;
+        // Mostrar tab config solo a admin
+        var tabCfg=document.getElementById("tab-config");
+        if(tabCfg)tabCfg.style.display=SESION.rol==="admin"?"":"none";
+        // Aplicar estado de territorio (con delay para que el DOM esté listo)
+        setTimeout(function(){_aplicarEstadoTerritorio(SESION.territorioActivo);},100);
+        mostrarVista('inicio');
+        _cargarMunicipios(function(){});
+        _cargarCatLocal(function(){});
+        _cargarCatCalles(function(){});
+        _cargarCatLenguas(function(){});
+      } else { e.innerText="Usuario o contraseña incorrectos"; }
+    })
+    .withFailureHandler(function(err){e.innerText="Error: "+(err.message||err);})
+    .validarLogin(u,p);
+}
+function logout(){location.reload();}
+
+/* ── UTILIDADES ── */
+function capitalizarCampo(el){
+  var pos=el.selectionStart;
+  var palabras=el.value.split(' ');
+  el.value=palabras.map(function(p){
+    if(!p)return p;
+    return p[0].toUpperCase()+p.slice(1).toLowerCase();
+  }).join(' ');
+  try{el.setSelectionRange(pos,pos);}catch(e){}
+}
+function soloTexto(el){
+  // Solo letras (incluyendo acentos y ñ), espacios y guión simple
+  // Rechaza números, símbolos y cualquier otro caracter
+  el.value=el.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s'-]/g,"");
+}
+function soloNumeroEntero(el){el.value=el.value.replace(/[^0-9]/g,"");}
+function marcarVerde(id){var w=document.getElementById("campo-"+id);var el=document.getElementById(id);if(!w||!el)return;var v=(el.tagName==="SELECT")?el.value:el.value.trim();if(v){w.classList.add("valido");w.classList.remove("error");}else{w.classList.remove("valido");}}
+
+/* _coordToStr / _guardarCoord / _parsearCoord
+   Oaxaca: latitud 15-18 (2 dígitos enteros), longitud 93-98 (2 dígitos enteros).
+   Cuando Sheets guarda sin punto: 17.072128 → 17072128
+   La corrección es siempre: insertar punto después del dígito 2. */
+
+function _coordToStr(n){
+  if(!n||isNaN(n)||n===0)return"";
+  var neg=(n<0);
+  var abs=Math.abs(n);
+  // Convertir a string sin toFixed (evita problema de locale "17.072.128")
+  // Multiplicar, truncar, reconstruir manualmente
+  var s=String(Math.round(abs*1000000));
+  // Pad a mínimo 8 dígitos (para coords de 2 dígitos enteros + 6 decimales)
+  while(s.length<8)s="0"+s;
+  // Insertar punto después del dígito 2 (regla Oaxaca)
+  return(neg?"-":"")+s.substring(0,2)+"."+s.substring(2);
+}
+
+function _guardarCoord(val){
+  if(val===null||val===undefined||val==="")return"";
+  var s=String(val).replace(/[^0-9.\-]/g,"").trim();
+  if(!s||s==="0")return"";
+  var neg=(s[0]==="-");
+  var digits=(neg?s.slice(1):s);
+  // Quitar ceros decimales de toFixed: "17072128.000000" → "17072128"
+  var puntoPosDigits=digits.indexOf(".");
+  if(puntoPosDigits!==-1)digits=digits.substring(0,puntoPosDigits);
+  // Ahora digits es solo la parte entera: "17072128" o "17" (si ya había punto real)
+  // Si el original tenía punto decimal real (ej "17.072128"), parseFloat da el número correcto
+  if(s.indexOf(".")!==-1){
+    var parteEntera=digits; // dígitos antes del punto
+    var parteDecimal=(neg?s.slice(1):s).split(".")[1]||"";
+    // Si la parte entera tiene solo 2 dígitos, ya tiene el formato correcto
+    if(parteEntera.length<=2){
+      while(parteDecimal.length<6)parteDecimal+="0";
+      return(neg?"-":"")+parteEntera+"."+parteDecimal.substring(0,6);
+    }
+    // Si la parte entera tiene más de 2 dígitos, es un número sin punto real
+    // (ej "17072128.000000") — tratar como sin punto
+  }
+  // Sin punto real: insertar después del dígito 2
+  while(digits.length<8)digits="0"+digits;
+  return(neg?"-":"")+digits.substring(0,2)+"."+digits.substring(2,8);
+}
+
+function _parsearCoord(val){
+  return _guardarCoord(val);
+}
+
+/* Longitud en Oaxaca SIEMPRE es negativa (-93.9 a -98.7).
+   Si llega positiva (el sheet perdió el signo), se le agrega. */
+function _parsearCoordLng(val){
+  var r=_guardarCoord(val);
+  if(!r)return"";
+  // Si ya es negativa, bien
+  if(r[0]==="-")return r;
+  // Si es positiva y está en rango de longitud de Oaxaca (93-99), agregar signo
+  var n=parseFloat(r);
+  if(!isNaN(n)&&n>=93&&n<=99)return"-"+r;
+  return r;
+}
+
+/* Para guardar longitud — siempre con signo negativo si está en rango Oaxaca */
+function _guardarCoordLng(val){
+  var r=_guardarCoord(val);
+  if(!r)return"";
+  if(r[0]==="-")return r;
+  var n=parseFloat(r);
+  if(!isNaN(n)&&n>=93&&n<=99)return"-"+r;
+  return r;
+}
+
+function validarCurp(el){
+  var val=el.value.trim();
+  var wrap=document.getElementById("campo-curp");
+  var msg=document.getElementById("msg-curp");
+  if(!val){if(wrap){wrap.classList.remove("valido","error");}if(msg)msg.innerText="";return;}
+  // Solo letras y números, sin caracteres especiales
+  if(/[^A-Z0-9]/.test(val)){
+    el.value=val.replace(/[^A-Z0-9]/g,"");
+    val=el.value;
+  }
+  if(val.length>0&&val.length<18){
+    if(wrap){wrap.classList.add("error");wrap.classList.remove("valido");}
+    if(msg){msg.innerText="La CURP debe tener 18 caracteres";msg.className="campo-msg msg-error";}
+    return;
+  }
+  if(val.length===18){
+    // Extraer edad del CURP: posiciones 4-9 son AAMMDD
+    var anio=parseInt(val.substring(4,6),10);
+    var mes=parseInt(val.substring(6,8),10);
+    var dia=parseInt(val.substring(8,10),10);
+    if(!isNaN(anio)&&!isNaN(mes)&&!isNaN(dia)&&mes>=1&&mes<=12&&dia>=1&&dia<=31){
+      var hoy=new Date();
+      var siglo=anio<=parseInt(String(hoy.getFullYear()).substring(2,4))?2000:1900;
+      var nacimiento=new Date(siglo+anio,mes-1,dia);
+      var edad=hoy.getFullYear()-nacimiento.getFullYear();
+      var m=hoy.getMonth()-nacimiento.getMonth();
+      if(m<0||(m===0&&hoy.getDate()<nacimiento.getDate()))edad--;
+      if(edad<18){
+        if(wrap){wrap.classList.add("error");wrap.classList.remove("valido");}
+        if(msg){msg.innerText="La CURP indica que la persona es menor de 18 años ("+edad+" años)";msg.className="campo-msg msg-error";}
+        return;
+      }
+      if(edad>120){
+        if(wrap){wrap.classList.add("error");wrap.classList.remove("valido");}
+        if(msg){msg.innerText="Fecha de nacimiento inválida en la CURP";msg.className="campo-msg msg-error";}
+        return;
+      }
+      // Auto-llenar edad si el campo está vacío
+      var edadEl=document.getElementById("edad");
+      if(edadEl&&!edadEl.value.trim()){edadEl.value=edad;}
+    }
+    if(wrap){wrap.classList.add("valido");wrap.classList.remove("error");}
+    if(msg){msg.innerText="✓ CURP válida";msg.className="campo-msg msg-ok";}
+  }
+}
+
+/* ── BOOLS ── */
+function selBool(campo,valor){
+  boolValues[campo]=valor||null;
+  var sel=document.getElementById("bool-wrap-"+campo);
+  if(sel){sel.classList.remove("bool-si","bool-no","bool-valido");if(valor==="Si")sel.classList.add("bool-si","bool-valido");else if(valor==="No")sel.classList.add("bool-no","bool-valido");}
+  if(campo==="hablaLengua"){var c=document.getElementById("cond_lenguaIndigena");if(c)c.style.display=valor==="Si"?"block":"none";if(valor!=="Si"){var li=document.getElementById("lenguaIndigena");if(li)li.value="";}}
+  if(campo==="tieneDiscapacidad"){var c2=document.getElementById("cond_tipoDiscapacidad");if(c2)c2.style.display=valor==="Si"?"block":"none";if(valor!=="Si"){var td=document.getElementById("tipoDiscapacidad");if(td)td.value="";}}
+  if(campo==="tienePredio"){
+    var c3=document.getElementById("cond_documentoPredio");
+    if(c3) c3.style.display = valor==="Si" ? "block":"none";
+    if(valor!=="Si"){var d=document.getElementById("documentoPredio");if(d) d.value="";}
+  }
+}
+
+/* ── TENENCIA PREDIO — Formulario nuevo ── */
+function toggleDocumentoPredio(){
+  var sel=document.getElementById("tipoTenenciaPredio");
+  var val=sel?sel.value:"";
+  var bloqueNoAplica=document.getElementById("bloque-no-aplica");
+  var condDoc=document.getElementById("cond_documentoPredio");
+  var bloqueDocLegal=document.getElementById("bloque-doc-legal");
+
+  if(val==="No aplica"){
+    // Mostrar bloque de referido, ocultar campos de titular
+    if(bloqueNoAplica)bloqueNoAplica.style.display="block";
+    if(condDoc)condDoc.style.display="none";
+    if(bloqueDocLegal)bloqueDocLegal.style.display="none";
+    // Limpiar campos del titular (no aplica → no hay titular registrado aquí)
+    var nt=document.getElementById("nombreTitular");var tt=document.getElementById("telefonoTitular");
+    var dp=document.getElementById("documentoPredio");
+    if(nt)nt.value="";if(tt)tt.value="";if(dp)dp.selectedIndex=0;
+    _bloquearPaso2(true);
+  } else if(val===""){
+    // Sin selección — ocultar todo condicional
+    if(bloqueNoAplica)bloqueNoAplica.style.display="none";
+    if(condDoc)condDoc.style.display="none";
+    if(bloqueDocLegal)bloqueDocLegal.style.display="block";
+    // Limpiar referido inline por si venía de No aplica
+    var rn=document.getElementById("nombreReferidoInline");var rt=document.getElementById("telefonoReferidoInline");
+    var rm=document.getElementById("msg-referido-inline");
+    if(rn)rn.value="";if(rt)rt.value="";if(rm)rm.innerText="";
+    _bloquearPaso2(false);
+  } else {
+    // Titular o Posesionario — mostrar campos de titular, ocultar referido
+    if(bloqueNoAplica)bloqueNoAplica.style.display="none";
+    if(condDoc)condDoc.style.display="block";
+    if(bloqueDocLegal)bloqueDocLegal.style.display="block";
+    // Limpiar referido inline por si venía de No aplica
+    var rn2=document.getElementById("nombreReferidoInline");var rt2=document.getElementById("telefonoReferidoInline");
+    var rm2=document.getElementById("msg-referido-inline");
+    if(rn2)rn2.value="";if(rt2)rt2.value="";if(rm2)rm2.innerText="";
+    _bloquearPaso2(false);
+  }
+}
+
+// Bloquea o desbloquea todos los inputs/selects del paso 2 excepto el de tenencia
+function _bloquearPaso2(bloquear){
+  var paso2=document.getElementById("paso-2");
+  if(!paso2)return;
+  var inputs=paso2.querySelectorAll("input,select,textarea");
+  inputs.forEach(function(el){
+    if(el.id==="tipoTenenciaPredio"||el.id==="nombreReferidoInline"||el.id==="telefonoReferidoInline")return;
+    el.disabled=bloquear;
+    el.style.opacity=bloquear?"0.4":"";
+  });
+  // El botón siguiente también se bloquea
+  var btnSig=paso2.querySelector(".btn-next");
+  if(btnSig){btnSig.disabled=bloquear;btnSig.style.opacity=bloquear?"0.4":"";}
+}
+
+function guardarReferidoInlineYSalir(){
+  var nombre=document.getElementById("nombreReferidoInline").value.trim();
+  var tel=document.getElementById("telefonoReferidoInline").value.trim();
+  var msg=document.getElementById("msg-referido-inline");
+  if(tel&&tel.length!==10){msg.innerText="El teléfono debe tener exactamente 10 dígitos.";return;}
+  msg.innerText="";
+  var solicitante=[
+    (document.getElementById("primerApellido")||{value:""}).value.trim(),
+    (document.getElementById("segundoApellido")||{value:""}).value.trim(),
+    (document.getElementById("nombres")||{value:""}).value.trim()
+  ].filter(Boolean).join(" ");
+
+  var btns=document.querySelectorAll("#bloque-no-aplica button");
+  btns.forEach(function(b){b.disabled=true;});
+  if(btns[0])btns[0].innerText="⏳ Guardando...";
+
+  var _doSalir=function(){
+    btns.forEach(function(b){b.disabled=false;});
+    if(btns[0])btns[0].innerText="✅ Guardar referido e iniciar nuevo registro";
+    alert("✅ Listo. Se iniciará un nuevo registro.");
+    nuevoRegistro();
+  };
+
+  if(nombre||tel){
+    google.script.run
+      .withSuccessHandler(_doSalir)
+      .withFailureHandler(function(e){
+        btns.forEach(function(b){b.disabled=false;});
+        if(btns[0])btns[0].innerText="✅ Guardar referido e iniciar nuevo registro";
+        msg.innerText="Error: "+(e.message||e);
+      })
+      .guardarReferido({nombreReferido:nombre,telefonoReferido:tel,solicitante:solicitante,capturista:SESION.nombre});
+  } else {
+    _doSalir();
+  }
+}
+
+function salirSinReferidoInline(){
+  nuevoRegistro();
+}
+
+function efSalirSinReferido(){
+  // Cerrar el bloque de referido y restablecer el select de tenencia
+  var sel=document.getElementById("ef-tipoTenenciaPredio");
+  if(sel){sel.value="";}
+  var banner=document.getElementById("ef-banner-no-aplica");
+  var bloqueRef=document.getElementById("ef-bloque-referido");
+  var condDoc=document.getElementById("ef-cond-docPredio");
+  var btnGuardar=document.getElementById("btn-guardar-edicion");
+  if(banner)banner.style.display="none";
+  if(bloqueRef)bloqueRef.style.display="none";
+  if(condDoc)condDoc.style.display="none";
+  if(btnGuardar){btnGuardar.disabled=false;btnGuardar.style.opacity="";btnGuardar.title="";}
+  var rn=document.getElementById("ef-nombreReferidoInline");
+  var rt=document.getElementById("ef-telefonoReferidoInline");
+  var rm=document.getElementById("ef-msg-referido-inline");
+  if(rn)rn.value="";if(rt)rt.value="";if(rm)rm.innerText="";
+}
+
+function guardarReferidoEdicionYSalir(){
+  var nombre=document.getElementById("ef-nombreReferidoInline").value.trim();
+  var tel=document.getElementById("ef-telefonoReferidoInline").value.trim();
+  var msg=document.getElementById("ef-msg-referido-inline");
+  if(tel&&tel.length!==10){msg.innerText="El teléfono debe tener 10 dígitos.";return;}
+  msg.innerText="";
+  var solicitante=document.getElementById("edit-titulo-nombre")?document.getElementById("edit-titulo-nombre").innerText:"";
+  var btn=document.getElementById("ef-bloque-referido").querySelector("button");
+  if(btn){btn.disabled=true;btn.innerText="⏳ Guardando...";}
+  var _doSalirEd=function(){
+    if(btn){btn.disabled=false;btn.innerText="✅ Guardar referido";}
+    alert("✅ Referido guardado.");
+    cerrarEdicion();
+  };
+  if(nombre||tel){
+    google.script.run
+      .withSuccessHandler(_doSalirEd)
+      .withFailureHandler(function(e){
+        if(btn){btn.disabled=false;btn.innerText="✅ Guardar referido";}
+        msg.innerText="Error: "+(e.message||e);
+      })
+      .guardarReferido({nombreReferido:nombre,telefonoReferido:tel,solicitante:solicitante,capturista:SESION.nombre});
+  } else {
+    _doSalirEd();
+  }
+}
+
+/* ── SERVICIOS ── */
+function toggleServicio(srv){var el=document.getElementById("srv-"+srv);if(!el)return;el.classList.toggle("checked");var ic=document.getElementById("icon-"+srv);if(ic)ic.innerHTML=el.classList.contains("checked")?"✓":"";}
+function getServicio(srv){var el=document.getElementById("srv-"+srv);return(el&&el.classList.contains("checked"))?"Sí":"";}
+
+/* ── GPS ── */
+function obtenerGPS(){if(!navigator.geolocation){alert("Geolocalización no disponible");return;}navigator.geolocation.getCurrentPosition(function(pos){document.getElementById("latitud").value=pos.coords.latitude.toFixed(6);document.getElementById("longitud").value=pos.coords.longitude.toFixed(6);marcarVerde("latitud");marcarVerde("longitud");},function(){alert("No se pudo obtener la ubicación");});}
+
+/* ── VIVIENDA OTRO ── */
+function toggleViviendaOtro(){var sel=document.getElementById("tipoVivienda");var cond=document.getElementById("cond_viviendaOtro");if(cond)cond.style.display=(sel&&sel.value==="Otro")?"block":"none";marcarVerde("tipoVivienda");}
+function toggleSinNum(tipo){if(tipo==="ext"){var chk=document.getElementById("sinNumExt");var inp=document.getElementById("numExterior");if(inp){inp.value=chk.checked?"S/N":"";inp.disabled=chk.checked;marcarVerde("numExterior");}}else{var chk2=document.getElementById("sinNumInt");var inp2=document.getElementById("numInterior");if(inp2){inp2.value=chk2.checked?"S/N":"";inp2.disabled=chk2.checked;marcarVerde("numInterior");}}}
+
+/* ── PROGRESS ── */
+var STEPS=["Nombre y domicilio","Vivienda y tenencia","Acceso al predio","Ocupantes y hogar","Materiales y servicios","Territorio"];
+function renderProgress(){var wrap=document.getElementById("progressSteps");if(!wrap)return;wrap.innerHTML=STEPS.map(function(label,i){var n=i+1;var cls=n<pasoActual?"step-tab done":n===pasoActual?"step-tab activo":"step-tab";return'<div class="'+cls+'"><div class="step-num">'+(n<pasoActual?"✓":n)+'</div><div class="step-label">'+label+'</div></div>';}).join("");}
+
+/* ── CORTE POR TIPO DE VIVIENDA ── */
+function chequearCorteVivienda(){
+  var val=document.getElementById("tipoVivienda")?document.getElementById("tipoVivienda").value:"";
+  var aviso=document.getElementById("aviso-corte-vivienda");
+  var lbl=document.getElementById("tipo-vivienda-corte");
+  var c1=document.getElementById("card-corte-bloqueo-1");
+  var btnSig=document.querySelector("#paso-2 .btn-next")||document.getElementById("btn-siguiente-paso2");
+  var esCorte=(val==="Rentada"||val==="Prestada"||val==="A crédito");
+  if(aviso)aviso.style.display=esCorte?"block":"none";
+  if(lbl)lbl.innerText=val.toLowerCase();
+  // Bloquear la card de tenencia y el botón siguiente cuando hay corte
+  if(c1){c1.style.opacity=esCorte?"0.35":"";c1.style.pointerEvents=esCorte?"none":"";}
+  if(btnSig){btnSig.style.display=esCorte?"none":"";btnSig.disabled=esCorte;}
+}
+
+/* ── NAVEGACIÓN ── */
+function irPaso(n){pasoActual=n;for(var i=1;i<=totalPasos;i++){var el=document.getElementById("paso-"+i);if(el)el.className="seccion"+(i===n?" activa":"");}document.getElementById("exito-wrap").style.display="none";renderProgress();window.scrollTo({top:0,behavior:"smooth"});if(n===5)generarResumen();if(n===6){setTimeout(function(){_aplicarEstadoTerritorio(SESION.territorioActivo);},50);}if(n===1){setTimeout(function(){if(!_mapas['mapa-gps']){var lat=parseFloat((document.getElementById('latitud')||{}).value)||_LAT_DEFAULT;var lng=parseFloat((document.getElementById('longitud')||{}).value)||_LNG_DEFAULT;_iniciarMapa('mapa-gps',lat,lng);}else{_mapas['mapa-gps'].map.invalidateSize();}},150);}}
+function siguiente(){if(!validarPaso(pasoActual))return;if(pasoActual<totalPasos)irPaso(pasoActual+1);}
+function anterior(){if(pasoActual>1)irPaso(pasoActual-1);}
+
+/* ── VALIDACIÓN PASO 1 ── */
+var REGLAS_PASO1=[
+  {id:"primerApellido",label:"Primer apellido",obligatorio:true,validar:function(v){if(!v)return{ok:false,msg:"Obligatorio"};if(v.length<2)return{ok:false,msg:"Mínimo 2 caracteres"};return{ok:true};}},
+  {id:"nombres",label:"Nombre(s)",obligatorio:true,validar:function(v){if(!v)return{ok:false,msg:"Obligatorio"};if(v.length<2)return{ok:false,msg:"Mínimo 2 caracteres"};return{ok:true};}},
+  {id:"edad",label:"Edad",obligatorio:true,validar:function(v){if(!v)return{ok:false,msg:"Obligatorio"};var n=parseInt(v,10);if(isNaN(n)||n<18)return{ok:false,msg:"Mínimo 18 años"};if(n>120)return{ok:false,msg:"Edad inválida"};return{ok:true};}},
+  {id:"telefono",label:"Teléfono",obligatorio:false,validar:function(v){if(!v)return{ok:true};if(v.length!==10)return{ok:false,msg:"Debe tener 10 dígitos"};return{ok:true};}}
+];
+function validarCampoVivo(id){var regla=null;for(var i=0;i<REGLAS_PASO1.length;i++){if(REGLAS_PASO1[i].id===id){regla=REGLAS_PASO1[i];break;}}if(!regla){marcarVerde(id);return true;}var el=document.getElementById(id);var wrap=document.getElementById("campo-"+id);if(!el||!wrap)return true;var val=el.value.trim();var res=regla.validar(val);var ok=res.ok||(!val&&!regla.obligatorio);wrap.className="campo"+(val?(ok?" valido":" error"):"");return ok;}
+function validarTodoPaso1(){var errores=[];for(var i=0;i<REGLAS_PASO1.length;i++){var r=REGLAS_PASO1[i];var el=document.getElementById(r.id);var val=el?el.value.trim():"";var res=r.validar(val);var ok=res.ok||(!val&&!r.obligatorio);var wrap=document.getElementById("campo-"+r.id);if(wrap)wrap.className="campo"+(val?(ok?" valido":" error"):"");if(!ok)errores.push(r.label+(res.msg?": "+res.msg:""));}return errores;}
+var _siguienteForzado=false;
+function cerrarModal(){document.getElementById("modal-errores").classList.remove("activo");}
+function continuarDeTodasFormas(){cerrarModal();_siguienteForzado=true;irPaso(pasoActual+1);_siguienteForzado=false;}
+function validarPaso(p){if(p===1){var err=validarTodoPaso1();if(err.length>0&&!_siguienteForzado){var lista=document.getElementById("modal-lista-errores");if(lista)lista.innerHTML=err.map(function(e){return"• "+e;}).join("<br>");document.getElementById("modal-errores").classList.add("activo");return false;}}return true;}
+
+/* ── RESUMEN ── */
+function generarResumen(){var cont=document.getElementById("resumen-contenido");if(!cont)return;var nombre=[document.getElementById("primerApellido").value,document.getElementById("segundoApellido").value,document.getElementById("nombres").value].filter(Boolean).join(" ");cont.innerHTML=[fila("Nombre completo",nombre),fila("Edad",document.getElementById("edad").value),fila("Teléfono",document.getElementById("telefono").value),fila("Municipio",document.getElementById("municipio").value),fila("Localidad",document.getElementById("localidad").value),fila("Tipo de vivienda",document.getElementById("tipoVivienda").value),fila("Personas en la vivienda",document.getElementById("personasVivienda").value),fila("Daño estructural",boolValues.danoEstructural||"—"),fila("Zona de riesgo",boolValues.zonaRiesgo||"—")].join("");}
+function fila(label,val){return'<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--crema-dark)"><span style="font-weight:600;color:var(--guinda);min-width:200px">'+label+'</span><span>'+(val||"—")+'</span></div>';}
+
+/* ── GUARDAR ── */
+function _construirDataActual(){
+  // Construye el objeto data con lo que esté capturado en ese momento
+  var tipoViv=document.getElementById("tipoVivienda")?document.getElementById("tipoVivienda").value:"";
+  if(tipoViv==="Otro"){var o=document.getElementById("tipoViviendaOtro");tipoViv=o?o.value||"Otro":"Otro";}
+  function g(id){var el=document.getElementById(id);return el?el.value.trim():"";}
+  return{
+    primerApellido:g("primerApellido"),segundoApellido:g("segundoApellido"),nombres:g("nombres"),
+    curp:g("curp").toUpperCase(),edad:g("edad"),telefono:g("telefono"),
+    hablaLengua:boolValues.hablaLengua||"",lenguaIndigena:g("lenguaIndigena"),
+    poblacionIndigena:boolValues.poblacionIndigena||"",poblacionAfro:boolValues.poblacionAfro||"",
+    tieneDiscapacidad:boolValues.tieneDiscapacidad||"",tipoDiscapacidad:g("tipoDiscapacidad"),
+    ingresoMensual:g("ingresoMensual"),tipoEmpleo:g("tipoEmpleo"),
+    calle:g("calle"),numExterior:g("numExterior"),numInterior:g("numInterior"),
+    colonia:g("colonia"),localidad:g("localidad"),municipio:g("municipio"),cp:g("cp"),
+    latitud:_guardarCoord(g("latitud")),longitud:_guardarCoordLng(g("longitud")),linkUbicacion:g("linkUbicacion"),
+    personasVivienda:g("personasVivienda"),personasPrograma:g("personasPrograma"),
+    tipoVivienda:tipoViv,numDormitorios:g("numDormitorios"),
+    jefeFamilia:g("jefeFamilia"),habitantesCarac:g("habitantesCarac"),
+    materialPiso:g("materialPiso"),materialTecho:g("materialTecho"),materialMuros:g("materialMuros"),
+    aguaPotable:getServicio("agua"),drenaje:getServicio("drenaje"),electricidad:getServicio("electricidad"),
+    gas:getServicio("gas"),internet:getServicio("internet"),
+    danoEstructural:boolValues.danoEstructural||"",danoNatural:boolValues.danoNatural||"",zonaRiesgo:boolValues.zonaRiesgo||"",
+    tipoTenenciaPredio:g("tipoTenenciaPredio"),espacioConstruccion:g("espacioConstruccion"),
+    condicionesAcceso:g("condicionesAcceso"),documentoPredio:g("documentoPredio"),
+    nombreTitular:g("nombreTitular"),telefonoTitular:g("telefonoTitular"),
+    llamadaRealizada:(document.getElementById("llamadaRealizada")&&document.getElementById("llamadaRealizada").checked)?"Sí":"",
+    capturista:SESION.nombre
+  };
+}
+
+function guardarBeneficiario(){
+  var tipoViv=document.getElementById("tipoVivienda").value;
+  if(tipoViv==="Otro")tipoViv=document.getElementById("tipoViviendaOtro").value||"Otro";
+  var data={
+    primerApellido:document.getElementById("primerApellido").value.trim(),
+    segundoApellido:document.getElementById("segundoApellido").value.trim(),
+    nombres:document.getElementById("nombres").value.trim(),
+    curp:document.getElementById("curp").value.trim().toUpperCase(),
+    edad:document.getElementById("edad").value,
+    telefono:document.getElementById("telefono").value,
+    hablaLengua:boolValues.hablaLengua||"",
+    lenguaIndigena:document.getElementById("lenguaIndigena").value,
+    poblacionIndigena:boolValues.poblacionIndigena||"",
+    poblacionAfro:boolValues.poblacionAfro||"",
+    tieneDiscapacidad:boolValues.tieneDiscapacidad||"",
+    tipoDiscapacidad:document.getElementById("tipoDiscapacidad").value,
+    ingresoMensual:document.getElementById("ingresoMensual").value,
+    calle:document.getElementById("calle").value,
+    numExterior:document.getElementById("numExterior").value,
+    numInterior:document.getElementById("numInterior").value,
+    colonia:document.getElementById("colonia").value,
+    localidad:document.getElementById("localidad").value,
+    municipio:document.getElementById("municipio").value,
+    cp:document.getElementById("cp").value,
+    latitud:_guardarCoord(document.getElementById("latitud").value),
+    longitud:_guardarCoordLng(document.getElementById("longitud").value),
+    personasVivienda:document.getElementById("personasVivienda").value,
+    personasPrograma:document.getElementById("personasPrograma").value,
+    tipoVivienda:tipoViv,
+    numDormitorios:document.getElementById("numDormitorios").value,
+    jefeFamilia:document.getElementById("jefeFamilia").value,
+    habitantesCarac:document.getElementById("habitantesCarac").value,
+    materialPiso:document.getElementById("materialPiso").value,
+    materialTecho:document.getElementById("materialTecho").value,
+    materialMuros:document.getElementById("materialMuros").value,
+    aguaPotable:getServicio("agua"),
+    drenaje:getServicio("drenaje"),
+    electricidad:getServicio("electricidad"),
+    gas:getServicio("gas"),
+    internet:getServicio("internet"),
+    danoEstructural:boolValues.danoEstructural||"",
+    danoNatural:boolValues.danoNatural||"",
+    zonaRiesgo:boolValues.zonaRiesgo||"",
+    tipoTenenciaPredio:document.getElementById("tipoTenenciaPredio").value,
+    espacioConstruccion:document.getElementById("espacioConstruccion").value,
+    condicionesAcceso:document.getElementById("condicionesAcceso").value,
+    documentoPredio:document.getElementById("documentoPredio")?document.getElementById("documentoPredio").value:"",
+    capturista:SESION.nombre,
+    tipoEmpleo:document.getElementById("tipoEmpleo").value,
+    nombreTitular:document.getElementById("nombreTitular").value.trim(),
+    telefonoTitular:document.getElementById("telefonoTitular").value.trim(),
+    linkUbicacion:document.getElementById("linkUbicacion").value.trim(),
+    llamadaRealizada:(document.getElementById("llamadaRealizada")&&document.getElementById("llamadaRealizada").checked)?"Sí":""
+  };
+  mostrarModalEnvio(data);
+}
+
+var _dataPendiente=null;
+function mostrarModalEnvio(data){
+  _dataPendiente=data;
+
+  // Campos de la sección LLAMADA (capturables ahora)
+  var chLlamada=[
+    {id:"primerApellido",label:"Primer apellido"},
+    {id:"nombres",label:"Nombre(s)"},
+    {id:"edad",label:"Edad"},
+    {id:"municipio",label:"Municipio"},
+    {id:"localidad",label:"Localidad"},
+    {id:"personasVivienda",label:"Personas en la vivienda"},
+    {id:"tipoVivienda",label:"Tipo de vivienda"},
+    {id:"materialPiso",label:"Material del piso"},
+    {id:"materialTecho",label:"Material del techo"},
+    {id:"materialMuros",label:"Material de los muros"}
+  ];
+
+  // Campos de TERRITORIO (se llenarán cuando vayan al predio)
+  var camposTerritorio=["Daño estructural","Daños por causas naturales","Zona de riesgo","Foto fachada","Foto interior","Foto entorno"];
+
+  var vaciosLlamada=[];
+  for(var i=0;i<chLlamada.length;i++){
+    var el=document.getElementById(chLlamada[i].id);
+    if(el&&!el.value.trim())vaciosLlamada.push(chLlamada[i].label);
+  }
+
+  var vaciosTerritorio=[];
+  if(!boolValues.danoEstructural)vaciosTerritorio.push("Daño estructural");
+  if(!boolValues.danoNatural)vaciosTerritorio.push("Daños por causas naturales");
+  if(!boolValues.zonaRiesgo)vaciosTerritorio.push("Zona de riesgo");
+  if(!document.getElementById("input-fachada").files.length)vaciosTerritorio.push("📷 Foto fachada");
+  if(!document.getElementById("input-interior").files.length)vaciosTerritorio.push("📷 Foto interior");
+  if(!document.getElementById("input-entorno").files.length)vaciosTerritorio.push("📷 Foto entorno");
+
+  var cont=document.getElementById("modal-envio-contenido");
+  var html="";
+
+  if(vaciosLlamada.length>0){
+    html+='<div style="background:#fff8e6;border:1.5px solid var(--dorado);border-radius:8px;padding:12px 14px;margin-bottom:12px">'
+      +'<div style="font-family:\'Sora\',sans-serif;font-size:12px;font-weight:700;color:#8a6200;margin-bottom:6px">📞 Datos de la llamada faltantes ('+vaciosLlamada.length+')</div>'
+      +'<div style="font-size:12px;color:var(--texto);line-height:1.8">'
+      +vaciosLlamada.map(function(v){return'• '+v;}).join('<br>')
+      +'</div></div>';
+  }
+
+  if(vaciosTerritorio.length>0){
+    html+='<div style="background:#f0f0f0;border:1.5px solid #bbb;border-radius:8px;padding:12px 14px;margin-bottom:12px">'
+      +'<div style="font-family:\'Sora\',sans-serif;font-size:12px;font-weight:700;color:#555;margin-bottom:6px">🔒 Se completarán en visita de campo ('+vaciosTerritorio.length+')</div>'
+      +'<div style="font-size:12px;color:#777;line-height:1.8">'
+      +vaciosTerritorio.map(function(v){return'• '+v;}).join('<br>')
+      +'<br><em style="font-size:11px">Estos campos estarán activos próximamente cuando realicen la visita al predio.</em>'
+      +'</div></div>';
+  }
+
+  if(vaciosLlamada.length===0&&vaciosTerritorio.length===0){
+    html='<div style="color:var(--verde);font-weight:600;font-size:13px">✅ Todos los datos de la llamada están completos.</div>';
+  } else if(vaciosLlamada.length===0){
+    html='<div style="color:var(--verde);font-weight:600;font-size:13px;margin-bottom:10px">✅ Datos de la llamada completos.</div>'+html;
+  }
+
+  cont.innerHTML=html;
+  document.getElementById("modal-envio").classList.add("activo");
+}
+function cerrarModalEnvio(){document.getElementById("modal-envio").classList.remove("activo");_dataPendiente=null;}
+
+function _fileABase64(file,tipo){return new Promise(function(resolve){if(!file){resolve(null);return;}var reader=new FileReader();reader.onload=function(e){var dataUrl=e.target.result;var mimeType=file.type||"image/jpeg";if(file.size<4*1024*1024){resolve({tipo:tipo,base64:dataUrl.split(",")[1],mimeType:mimeType});return;}var img=new Image();img.onload=function(){var MAX=2400;var w=img.width,h=img.height;if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}else{if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}var canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;canvas.getContext("2d").drawImage(img,0,0,w,h);var b64=canvas.toDataURL("image/jpeg",0.92).split(",")[1];resolve({tipo:tipo,base64:b64,mimeType:"image/jpeg"});};img.onerror=function(){resolve(null);};img.src=dataUrl;};reader.onerror=function(){resolve(null);};reader.readAsDataURL(file);});}
+
+var _guardandoEnCurso = false; // bandera global anti-doble-clic
+
+function confirmarEnvio(){
+  if(_guardandoEnCurso)return; // evitar doble envío
+  _guardandoEnCurso=true;
+  document.getElementById("modal-envio").classList.remove("activo");
+  if(!_dataPendiente){_guardandoEnCurso=false;alert("Error interno. Intenta de nuevo.");return;}
+  var data=_dataPendiente;
+
+  // Deshabilitar TODOS los botones de guardar y el botón confirmar del modal
+  document.querySelectorAll(".btn-guardar, #modal-envio .modal-btn-continuar").forEach(function(b){
+    b.disabled=true;b.style.opacity="0.6";
+  });
+  var btnActivo=document.querySelector(".seccion.activa .btn-guardar")||document.querySelector(".btn-guardar");
+  if(btnActivo)btnActivo.innerText="⏳ Guardando datos...";
+
+  data.fotos=[];
+  google.script.run
+    .withSuccessHandler(function(res){
+      _dataPendiente=null;
+      var idRegistro=res.idRegistro||"";
+      var primerNombre=document.getElementById("nombres").value.trim().split(" ")[0]||"foto";
+      var tipos=["fachada","interior","entorno"];
+      var archivos=[
+        (document.getElementById("input-fachada")||{files:[]}).files[0]||null,
+        (document.getElementById("input-interior")||{files:[]}).files[0]||null,
+        (document.getElementById("input-entorno")||{files:[]}).files[0]||null
+      ];
+      var totalFotos=archivos.filter(function(f){return f!==null;}).length;
+      var fotosCargadas=0;
+      function subirSiguienteFoto(idx){
+        if(idx>=tipos.length){_mostrarExito(idRegistro);return;}
+        var file=archivos[idx];
+        if(!file){subirSiguienteFoto(idx+1);return;}
+        if(btnActivo)btnActivo.innerText="Subiendo foto "+(fotosCargadas+1)+" de "+totalFotos+"...";
+        _fileABase64(file,tipos[idx]).then(function(fotoObj){
+          if(!fotoObj){subirSiguienteFoto(idx+1);return;}
+          google.script.run
+            .withSuccessHandler(function(){fotosCargadas++;subirSiguienteFoto(idx+1);})
+            .withFailureHandler(function(err){console.warn("Error foto:"+tipos[idx]);subirSiguienteFoto(idx+1);})
+            .guardarFotoEnDrive(idRegistro,primerNombre,fotoObj);
+        });
+      }
+      subirSiguienteFoto(0);
+    })
+    .withFailureHandler(function(err){
+      _dataPendiente=null;_guardandoEnCurso=false;
+      // Rehabilitar botones
+      document.querySelectorAll(".btn-guardar").forEach(function(b){
+        b.disabled=false;b.style.opacity="";b.innerText="✅ Guardar registro";
+      });
+      alert("Error al guardar: "+(err.message||err));
+    })
+    .guardarBeneficiario(data);
+}
+
+function _mostrarExito(idRegistro){
+  _guardandoEnCurso=false;
+  for(var i=1;i<=totalPasos;i++){var el=document.getElementById("paso-"+i);if(el)el.className="seccion";}
+  var ew=document.getElementById("exito-wrap");var ei=document.getElementById("exito-id");
+  if(ew)ew.style.display="block";if(ei)ei.innerText="Registro #"+idRegistro;
+  // Rehabilitar botones para el próximo uso
+  document.querySelectorAll(".btn-guardar").forEach(function(b){
+    b.disabled=false;b.style.opacity="";b.innerText="✅ Guardar registro";
+  });
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+/* ── FOTOS ── */
+function previsualizarFoto(tipo,input){if(!input.files||!input.files[0])return;var file=input.files[0];var reader=new FileReader();reader.onload=function(e){var prev=document.getElementById("prev-"+tipo);var zona=document.getElementById("zona-"+tipo);var est=document.getElementById("est-"+tipo);if(prev)prev.innerHTML='<img src="'+e.target.result+'" alt="foto '+tipo+'">';if(zona)zona.classList.add("con-foto");if(est)est.innerHTML="✅ "+file.name.substring(0,28);};reader.readAsDataURL(file);}
+
+/* ── LENGUAS ── */
+var LENGUAS_INDIGENAS=[{id:"101",nombre:"Kikapú (Kickapoo)"},{id:"201",nombre:"Pápago (O'otam)"},{id:"202",nombre:"Pima (Oichkama no'oka)"},{id:"203",nombre:"Tepehuano de Chihuahua"},{id:"204",nombre:"Tepehuano de Durango"},{id:"205",nombre:"Tarahumara (Ralámuli)"},{id:"206",nombre:"Guarijío (Warihó)"},{id:"207",nombre:"Yaqui (Jiak Noki)"},{id:"208",nombre:"Mayo (Yoremnokki)"},{id:"209",nombre:"Cora (Náayari)"},{id:"210",nombre:"Huichol (Wixárika)"},{id:"211",nombre:"Náhuatl"},{id:"301",nombre:"Paipai"},{id:"302",nombre:"Ku'ahl"},{id:"303",nombre:"Cucapá (Kuapá)"},{id:"304",nombre:"Kumiai"},{id:"305",nombre:"Kiliwa"},{id:"401",nombre:"Seri (Cmiique Iitom)"},{id:"501",nombre:"Otomí (Hñähñu)"},{id:"502",nombre:"Mazahua (Jñatrjo)"},{id:"503",nombre:"Matlatzinca"},{id:"504",nombre:"Ocuilteco (Tlahuica)"},{id:"505",nombre:"Pame (Xi'oi)"},{id:"506",nombre:"Chichimeco jonaz"},{id:"507",nombre:"Chinanteco"},{id:"508",nombre:"Tlapaneco (Me'phaa)"},{id:"509",nombre:"Mazateco (Énná)"},{id:"510",nombre:"Ixcateco"},{id:"511",nombre:"Chocholteco"},{id:"512",nombre:"Popoloca"},{id:"513",nombre:"Zapoteco"},{id:"514",nombre:"Chatino"},{id:"515",nombre:"Amuzgo (Ñomndaa)"},{id:"516",nombre:"Mixteco (Tu'un Savi)"},{id:"517",nombre:"Cuicateco"},{id:"518",nombre:"Triqui"},{id:"601",nombre:"Huasteco (Tének)"},{id:"602",nombre:"Maya (Maayata'an)"},{id:"603",nombre:"Lacandón"},{id:"604",nombre:"Chol (Ch'ol)"},{id:"605",nombre:"Chontal de Tabasco"},{id:"606",nombre:"Tzeltal"},{id:"607",nombre:"Tzotzil"},{id:"608",nombre:"Kanjobal"},{id:"609",nombre:"Akateko"},{id:"610",nombre:"Jakalteko"},{id:"611",nombre:"Qato'k (Mocho')"},{id:"612",nombre:"Chuj"},{id:"613",nombre:"Tojolabal"},{id:"614",nombre:"Kekchi"},{id:"615",nombre:"Quiché"},{id:"616",nombre:"Cakchiquel"},{id:"617",nombre:"Teco"},{id:"618",nombre:"Mame"},{id:"619",nombre:"Awakateko"},{id:"620",nombre:"Ixil"},{id:"701",nombre:"Totonaca"},{id:"702",nombre:"Tepehua"},{id:"801",nombre:"Purépecha (Tarasco)"},{id:"901",nombre:"Mixe"},{id:"902",nombre:"Sayulteco"},{id:"903",nombre:"Oluteco"},{id:"904",nombre:"Texistepequeño"},{id:"905",nombre:"Ayapaneco"},{id:"906",nombre:"Popoluca de la Sierra"},{id:"907",nombre:"Zoque"},{id:"1001",nombre:"Chontal de Oaxaca"},{id:"1101",nombre:"Huave (Ombeayiüts)"},{id:"1201",nombre:"N'dee (Apache)"}];
+/* ── MODOS DE UBICACIÓN ── */
+function activarModoUbicacion(modo){
+  var btnDir=document.getElementById('modo-btn-direccion');
+  var btnGps=document.getElementById('modo-btn-gps');
+  var notaDir=document.getElementById('nota-modo-direccion');
+  var notaGps=document.getElementById('nota-modo-gps');
+  if(modo==='gps'){
+    if(btnDir){btnDir.style.background='white';btnDir.style.color='var(--texto-soft)';}
+    if(btnGps){btnGps.style.background='var(--guinda)';btnGps.style.color='white';}
+    if(notaDir)notaDir.style.display='none';
+    if(notaGps)notaGps.style.display='block';
+    obtenerGPS();
+  } else {
+    if(btnDir){btnDir.style.background='var(--guinda)';btnDir.style.color='white';}
+    if(btnGps){btnGps.style.background='white';btnGps.style.color='var(--texto-soft)';}
+    if(notaDir)notaDir.style.display='block';
+    if(notaGps)notaGps.style.display='none';
+    var mun=document.getElementById('municipio');
+    if(mun&&mun.value.trim()){
+      var coords=_coordsMunicipio(mun.value.trim());
+      if(coords)_centrarMapaEnCoords('mapa-gps',coords[0],coords[1],13);
+    }
+    var cp=document.getElementById('cp');
+    if(cp&&cp.value.length===5)_centrarMapaPorCP(cp.value,'mapa-gps');
+  }
+}
+
+/* ══ CATÁLOGO LENGUAS — carga dinámica desde Sheets ══ */
+var _lenguasCatCache = null;
+var _lenguasCatCargando = false;
+
+function _cargarCatLenguas(callback) {
+  if (_lenguasCatCache !== null) { callback(_lenguasCatCache); return; }
+  if (_lenguasCatCargando) { setTimeout(function(){ _cargarCatLenguas(callback); }, 250); return; }
+  _lenguasCatCargando = true;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      // res = array de strings de nombres de lengua
+      if (res && res.length > 0) {
+        // Enriquecer/reemplazar la lista local con la del catálogo
+        _lenguasCatCache = res.map(function(n,i){ return { id: String(i+1), nombre: String(n) }; });
+      } else {
+        // Fallback: usar la lista local hardcodeada
+        _lenguasCatCache = LENGUAS_INDIGENAS;
+      }
+      _lenguasCatCargando = false;
+      callback(_lenguasCatCache);
+    })
+    .withFailureHandler(function(e) {
+      console.warn("Error lenguas catálogo:", e);
+      _lenguasCatCache = LENGUAS_INDIGENAS; // fallback a lista local
+      _lenguasCatCargando = false;
+      callback(_lenguasCatCache);
+    })
+    .obtenerCatalogoLenguas();
+}
+
+function filtrarLenguas(query){
+  var dd=document.getElementById("lenguas-dropdown");
+  if(!dd)return;
+  if(!query||query.trim().length<1){dd.style.display="none";return;}
+  var q=quitarAcentos(query.toLowerCase().trim());
+  // Usar catálogo dinámico si ya cargó, si no la lista local
+  var lista = _lenguasCatCache || LENGUAS_INDIGENAS;
+  var res=[];
+  for(var i=0;i<lista.length;i++){
+    if(quitarAcentos(lista[i].nombre.toLowerCase()).indexOf(q)!==-1) res.push(lista[i]);
+  }
+  if(res.length===0){dd.style.display="none";return;}
+  var html="";
+  for(var j=0;j<res.length;j++){
+    var l=res[j];
+    html+='<div onmousedown="seleccionarLengua(this)" data-nombre="'+l.nombre.replace(/"/g,"&quot;")+'" style="padding:10px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0e9de;display:flex;gap:10px"><span style="color:#7a5f68;font-size:11px;min-width:36px">'+l.id+'</span><span>'+l.nombre+'</span></div>';
+  }
+  dd.innerHTML=html;dd.style.display="block";
+}
+
+function seleccionarLengua(el){var n=el.getAttribute("data-nombre");var inp=document.getElementById("lenguaIndigena");if(inp)inp.value=n;var dd=document.getElementById("lenguas-dropdown");if(dd)dd.style.display="none";}
+function cerrarDropdown(){setTimeout(function(){var dd=document.getElementById("lenguas-dropdown");if(dd)dd.style.display="none";},180);}
+function quitarAcentos(str){return str.normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
+
+/* ── NUEVO REGISTRO ── */
+function _limpiarFormularioSinMapa(){
+  // Igual que nuevoRegistro pero sin resetear el mapa
+  Object.keys(boolValues).forEach(function(k){boolValues[k]=null;});
+  document.querySelectorAll(".bool-select").forEach(function(s){s.value="";s.classList.remove("bool-si","bool-no","bool-valido");});
+  document.querySelectorAll("input:not([type=checkbox]):not([type=hidden]),select,textarea").forEach(function(el){if(el.tagName==="SELECT")el.selectedIndex=0;else el.value="";el.disabled=false;el.style.opacity="";});
+  document.querySelectorAll("input[type=checkbox]").forEach(function(c){c.checked=false;});
+  ["agua","drenaje","electricidad","gas","internet"].forEach(function(s){var el=document.getElementById("srv-"+s);if(el)el.classList.remove("checked");var ic=document.getElementById("icon-"+s);if(ic)ic.innerHTML="";});
+  document.querySelectorAll(".campo").forEach(function(el){el.classList.remove("valido","error");});
+  document.querySelectorAll(".campo-condicional").forEach(function(el){el.style.display="none";});
+  var bna=document.getElementById("bloque-no-aplica");if(bna)bna.style.display="none";
+  var aviso=document.getElementById("aviso-corte-vivienda");if(aviso)aviso.style.display="none";
+  var c1=document.getElementById("card-corte-bloqueo-1");var c2=document.getElementById("card-corte-bloqueo-2");
+  [c1,c2].forEach(function(c){if(!c)return;c.style.opacity="";c.style.pointerEvents="";});
+  var paso2=document.getElementById("paso-2");
+  if(paso2){var btnSig=paso2.querySelector(".btn-next");if(btnSig){btnSig.disabled=false;btnSig.style.opacity="";btnSig.style.display="";}}
+}
+
+function nuevoRegistro(){
+  _MODO="nuevo";
+  _editandoFila=null;
+  // Ocultar header de edición
+  var hdr=document.getElementById("modo-edicion-header");
+  if(hdr)hdr.style.display="none";
+  // Limpiar formulario
+  _limpiarFormularioSinMapa();
+  ["fachada","interior","entorno"].forEach(function(t){var inp=document.getElementById("input-"+t);if(inp)inp.value="";var zona=document.getElementById("zona-"+t);if(zona)zona.classList.remove("con-foto");var est=document.getElementById("est-"+t);if(est)est.innerHTML="";var prev=document.getElementById("prev-"+t);if(prev)prev.innerHTML='<div class="foto-placeholder"><span style="font-size:32px">'+(t==="fachada"?"🏠":t==="interior"?"🛋️":"🌳")+'</span><span class="foto-label">Foto '+t+'</span><span class="foto-hint">Toca para tomar foto</span></div>';});
+  document.getElementById("exito-wrap").style.display="none";
+  // Mostrar barra de progreso (oculta en edición)
+  var prog=document.getElementById("progress-wrap");
+  if(prog)prog.style.display="";
+  _resetearMapaNuevo();
+  irPaso(1);
+}
+
+/* ══════════════════════════════════════════════
+   PANEL DE REGISTROS
+══════════════════════════════════════════════ */
+var _registrosCache=[];
+var _editandoFila=null;
+
+/* ── DETECCIÓN DE CAMBIOS EN EL FORMULARIO ── */
+function _hayDatosCapturados(){
+  // Revisa si hay algo escrito en los campos clave del formulario
+  var campos=["primerApellido","nombres","edad","telefono","calle","municipio","localidad","curp"];
+  for(var i=0;i<campos.length;i++){
+    var el=document.getElementById(campos[i]);
+    if(el&&el.value.trim()!=="")return true;
+  }
+  // También revisar si ya hay fotos seleccionadas
+  var fotos=["input-fachada","input-interior","input-entorno"];
+  for(var j=0;j<fotos.length;j++){
+    var fi=document.getElementById(fotos[j]);
+    if(fi&&fi.files&&fi.files.length>0)return true;
+  }
+  return false;
+}
+
+var _vistaPendiente=null; // vista a la que quiere ir después de confirmar
+
+function mostrarVista(vista){
+  var cuest=document.getElementById("cuestionario-wrap");
+  var prog=document.getElementById("progress-wrap");
+  var exito=document.getElementById("exito-wrap");
+  var panel=document.getElementById("panel-registros");
+  var edit=document.getElementById("pantalla-edicion");
+  var inicio=document.getElementById("pantalla-inicio");
+  var tabI=document.getElementById("tab-inicio");
+  var tabC=document.getElementById("tab-cuestionario");
+  var tabR=document.getElementById("tab-registros");
+  var tabCfg=document.getElementById("tab-config");
+  var panelCfg=document.getElementById("panel-config");
+
+  // Si hay datos capturados y va a salir del cuestionario → preguntar
+  var exitoVisible=(exito&&exito.style.display==="block");
+  var cuestionarioVisible=(cuest&&cuest.style.display!=="none");
+  if((vista==="registros"||vista==="inicio")&&cuestionarioVisible&&!exitoVisible&&_hayDatosCapturados()){
+    _vistaPendiente=vista;
+    document.getElementById("modal-salir").classList.add("activo");
+    return;
+  }
+
+  // Ocultar todo
+  if(cuest)cuest.style.display="none";
+  if(prog)prog.style.display="none";
+  if(exito)exito.style.display="none";
+  if(panel)panel.style.display="none";
+  if(edit)edit.style.display="none";
+  if(inicio)inicio.style.display="none";
+  if(panelCfg)panelCfg.style.display="none";
+  [tabI,tabC,tabR,tabCfg].forEach(function(t){if(t)t.classList.remove("activo");});
+
+  if(vista==="inicio"){
+    if(inicio)inicio.style.display="block";
+    if(tabI)tabI.classList.add("activo");
+  } else if(vista==="registros"){
+    if(panel)panel.style.display="block";
+    if(tabR)tabR.classList.add("activo");
+    cargarUltimosRegistros();
+  } else if(vista==="config"){
+    if(panelCfg)panelCfg.style.display="block";
+    if(tabCfg)tabCfg.classList.add("activo");
+    _cargarPanelConfig();
+  } else {
+    // cuestionario — si venía de otra vista, limpiar siempre para nuevo registro
+    var veniaDeCuestionario=(cuest&&cuest.style.display!=="none");
+    if(cuest)cuest.style.display="";
+    if(prog)prog.style.display="";
+    if(tabC)tabC.classList.add("activo");
+    if(!veniaDeCuestionario){
+      // Viene de inicio o registros → limpiar para nuevo registro limpio
+      nuevoRegistro();
+    } else {
+      // Ya estaba en cuestionario, solo asegurar que haya un paso activo
+      var hayAlgunActivo=false;
+      for(var p=1;p<=totalPasos;p++){var pp=document.getElementById("paso-"+p);if(pp&&pp.className.indexOf("activa")!==-1){hayAlgunActivo=true;break;}}
+      if(!hayAlgunActivo)irPaso(1);
+    }
+  }
+}
+
+function accionSalir(accion){
+  document.getElementById("modal-salir").classList.remove("activo");
+  if(accion==="quedarme"){_vistaPendiente=null;return;}
+  if(accion==="descartar"&&_vistaPendiente){
+    var dest=_vistaPendiente;_vistaPendiente=null;
+    nuevoRegistro();
+    mostrarVista(dest);
+  }
+}
+
+function accionSalirYGuardar(){
+  document.getElementById("modal-salir").classList.remove("activo");
+  // Ir al paso 5 donde está el botón guardar, y disparar el guardado
+  irPaso(5);
+  // Pequeño delay para que el UI actualice antes de abrir el modal de envío
+  setTimeout(function(){ guardarBeneficiario(); }, 150);
+}
+
+function confirmarSalirSinGuardar(){
+  if(_hayDatosCapturados()){
+    _vistaPendiente="inicio";
+    document.getElementById("modal-salir").classList.add("activo");
+  } else {
+    nuevoRegistro();
+    mostrarVista("inicio");
+  }
+}
+
+function cargarUltimosRegistros(){
+  var cont=document.getElementById("reg-contenido");
+  cont.innerHTML='<div class="reg-cargando">⏳ Cargando último registro…</div>';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res||res.length===0){cont.innerHTML='<div class="reg-empty">No hay registros todavía.</div>';return;}
+      _renderTabla(res);
+    })
+    .withFailureHandler(function(e){cont.innerHTML='<div class="reg-empty" style="color:var(--rojo);padding:20px"><strong>Error:</strong> '+(e.message||JSON.stringify(e))+'<br><small>Republica el script.</small></div>';})
+    .obtenerUltimosRegistros(1);
+}
+
+function cargarNRegistros(n){
+  var cont=document.getElementById("reg-contenido");
+  cont.innerHTML='<div class="reg-cargando">⏳ Cargando últimos '+n+' registros…</div>';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res||res.length===0){cont.innerHTML='<div class="reg-empty">No hay registros todavía.</div>';return;}
+      _renderTabla(res);
+    })
+    .withFailureHandler(function(e){cont.innerHTML='<div class="reg-empty" style="color:var(--rojo)">Error: '+(e.message||e)+'</div>';})
+    .obtenerUltimosRegistros(n);
+}
+
+function buscarRegistros(){
+  var q=document.getElementById("reg-buscar-input").value.trim();
+  if(!q){cargarUltimosRegistros();return;}
+  if(q.length<2){
+    document.getElementById("reg-contenido").innerHTML='<div class="reg-empty">Escribe al menos 2 letras para buscar.</div>';
+    return;
+  }
+  document.getElementById("reg-contenido").innerHTML='<div class="reg-cargando">⏳ Buscando…</div>';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res||res.length===0){
+        document.getElementById("reg-contenido").innerHTML='<div class="reg-empty">No se encontraron beneficiarios con ese nombre.</div>';
+        return;
+      }
+      _renderTabla(res);
+    })
+    .withFailureHandler(function(e){document.getElementById("reg-contenido").innerHTML='<div class="reg-empty" style="color:var(--rojo)">Error: '+(e.message||e)+'</div>';})
+    .buscarRegistro(q);
+}
+
+function _renderTabla(rows){
+  _registrosCache=rows||[];
+  var cont=document.getElementById("reg-contenido");
+  if(!rows||rows.length===0){cont.innerHTML='<div class="reg-empty">No hay registros todavía.</div>';return;}
+  var html='<table class="reg-tabla"><thead><tr><th>ID Folio</th><th>Fecha</th><th>Nombre completo</th><th>Municipio</th><th>📞 Llamada</th><th>Acciones</th></tr></thead><tbody>';
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    var nombre=((r[3]||"")+" "+(r[4]||"")+" "+(r[5]||"")).trim();
+    // r[54] = LlamadaRealizada (índice 54, columna 55 del sheet)
+    var llamada=String(r[54]||"").toLowerCase();
+    var llamadaBadge=llamada==="sí"||llamada==="si"
+      ? '<span style="background:#e6f4ed;color:var(--verde);border:1px solid var(--verde);border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;white-space:nowrap">✅ Sí</span>'
+      : '<span style="background:var(--crema-dark);color:var(--texto-soft);border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;white-space:nowrap">—</span>';
+    html+='<tr>'
+      +'<td><span class="reg-id">'+(r[2]||"—")+'</span></td>'
+      +'<td>'+(r[1]||"—")+'</td>'
+      +'<td>'+nombre+'</td>'
+      +'<td>'+(r[21]||"—")+'</td>'
+      +'<td>'+llamadaBadge+'</td>'
+      +'<td style="white-space:nowrap">'
+        +'<button class="btn-reg-edit" onclick="abrirEditar('+i+')">✏️ Editar</button>'
+        +'<button class="btn-reg-del" onclick="eliminarRegistro('+i+')">🗑️</button>'
+      +'</td>'
+    +'</tr>';
+  }
+  html+='</tbody></table>';
+  cont.innerHTML=html;
+}
+
+function eliminarRegistro(idx){
+  var r=_registrosCache[idx];if(!r)return;
+  var nombre=((r[3]||"")+" "+(r[4]||"")+" "+(r[5]||"")).trim();
+  if(!confirm('¿Eliminar registro '+(r[2]||"")+'  — '+nombre+'?\nEsta acción no se puede deshacer.'))return;
+  document.getElementById("reg-contenido").innerHTML='<div class="reg-cargando">⏳ Eliminando…</div>';
+  google.script.run
+    .withSuccessHandler(function(){cargarUltimosRegistros();})
+    .withFailureHandler(function(e){alert("Error al eliminar: "+(e.message||e));cargarUltimosRegistros();})
+    .eliminarRegistro(r[2]); // r[2] = ID de registro (col 3 del sheet)
+}
+
+/* ══════════════════════════════════════════════
+   EDICIÓN COMPLETA
+══════════════════════════════════════════════ */
+var EF_IDX={
+  // r[0]=No.  r[1]=Fecha  r[2]=ID  — estos 3 nunca se editan
+  primerApellido:3,segundoApellido:4,nombres:5,curp:6,edad:7,telefono:8,
+  personasVivienda:9,hablaLengua:10,lenguaIndigena:11,poblacionIndigena:12,
+  poblacionAfro:13,tieneDiscapacidad:14,tipoDiscapacidad:15,
+  calle:16,numExterior:17,numInterior:18,colonia:19,localidad:20,municipio:21,cp:22,
+  personasPrograma:23,tipoVivienda:24,ingresoMensual:25,numDormitorios:26,
+  materialPiso:27,materialTecho:28,materialMuros:29,
+  aguaPotable:30,drenaje:31,electricidad:32,gas:33,internet:34,
+  danoEstructural:35,danoNatural:36,zonaRiesgo:37,
+  latitud:38,longitud:39,jefeFamilia:40,habitantesCarac:41,capturista:42,
+  fotoFachada:43,fotoInterior:44,fotoEntorno:45,
+  tipoTenenciaPredio:46,espacioConstruccion:47,condicionesAcceso:48,documentoPredio:49,
+  tipoEmpleo:50,nombreTitular:51,telefonoTitular:52,linkUbicacion:53,llamadaRealizada:54
+};
+
+function efV(r,campo){var v=r[EF_IDX[campo]];return(v===undefined||v===null)?"":String(v);}
+function efSet(id,val){var el=document.getElementById(id);if(el)el.value=val||"";}
+function efSetBool(id,val){var el=document.getElementById(id);if(!el)return;el.value=val||"";el.classList.remove("bool-si","bool-no","bool-valido");if(val==="Si")el.classList.add("bool-si","bool-valido");else if(val==="No")el.classList.add("bool-no","bool-valido");}
+function efEstiloBool(sel){sel.classList.remove("bool-si","bool-no","bool-valido");if(sel.value==="Si")sel.classList.add("bool-si","bool-valido");else if(sel.value==="No")sel.classList.add("bool-no","bool-valido");}
+function efSelBool(campo,valor){if(campo==="hablaLengua"){var c=document.getElementById("ef-cond-lengua");if(c)c.style.display=valor==="Si"?"block":"none";}if(campo==="tieneDiscapacidad"){var c2=document.getElementById("ef-cond-discapacidad");if(c2)c2.style.display=valor==="Si"?"block":"none";}var sel=document.getElementById("ef-"+campo);if(sel)efEstiloBool(sel);}
+/* ── CORTE VIVIENDA EN EDICIÓN ── */
+function efChequearCorteVivienda(){
+  var val=document.getElementById("ef-tipoVivienda")?document.getElementById("ef-tipoVivienda").value:"";
+  var aviso=document.getElementById("ef-aviso-corte");
+  var lbl=document.getElementById("ef-tipo-vivienda-corte");
+  var ids=["ef-card-corte-1","ef-card-corte-2","ef-card-corte-3","ef-card-predio","ef-card-corte-5"];
+  var esCorte=(val==="Rentada"||val==="Prestada");
+  if(aviso)aviso.style.display=esCorte?"block":"none";
+  if(lbl)lbl.innerText=val.toLowerCase();
+  ids.forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.style.opacity=esCorte?"0.35":"";
+    el.style.pointerEvents=esCorte?"none":"";
+  });
+}
+
+function efToggleDocPredio(){
+  var sel=document.getElementById("ef-tipoTenenciaPredio");
+  var val=sel?sel.value:"";
+  var condDoc=document.getElementById("ef-cond-docPredio");
+  var banner=document.getElementById("ef-banner-no-aplica");
+  var bloqueRefEdit=document.getElementById("ef-bloque-referido");
+  var btnGuardar=document.getElementById("btn-guardar-edicion");
+
+  var camposBloquear=[
+    "ef-documentoPredio","ef-espacioConstruccion","ef-condicionesAcceso",
+    "ef-materialPiso","ef-materialTecho","ef-materialMuros",
+    "ef-numDormitorios","ef-personasVivienda","ef-ingresoMensual","ef-tipoEmpleo",
+    "ef-jefeFamilia","ef-habitantesCarac","ef-tipoVivienda",
+    "ef-danoEstructural","ef-danoNatural","ef-zonaRiesgo"
+  ];
+
+  if(val==="No aplica"){
+    if(condDoc)condDoc.style.display="none";
+    if(banner)banner.style.display="block";
+    if(bloqueRefEdit)bloqueRefEdit.style.display="block";
+    // Limpiar campos de titular (si venían llenos de una selección anterior)
+    var nt=document.getElementById("ef-nombreTitular");var tt=document.getElementById("ef-telefonoTitular");
+    var dp=document.getElementById("ef-documentoPredio");
+    if(nt)nt.value="";if(tt)tt.value="";if(dp)dp.selectedIndex=0;
+    camposBloquear.forEach(function(id){
+      var el=document.getElementById(id);if(el){el.disabled=true;el.style.opacity="0.4";}
+    });
+    if(btnGuardar){btnGuardar.disabled=true;btnGuardar.style.opacity="0.5";btnGuardar.title="Cambia la tenencia para poder guardar";}
+  } else if(val===""){
+    // Sin selección — ocultar todo
+    if(condDoc)condDoc.style.display="none";
+    if(banner)banner.style.display="none";
+    if(bloqueRefEdit)bloqueRefEdit.style.display="none";
+    // Limpiar referido inline por si venía de No aplica
+    var rn=document.getElementById("ef-nombreReferidoInline");var rt=document.getElementById("ef-telefonoReferidoInline");
+    var rm=document.getElementById("ef-msg-referido-inline");
+    if(rn)rn.value="";if(rt)rt.value="";if(rm)rm.innerText="";
+    camposBloquear.forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=false;el.style.opacity="";}});
+    if(btnGuardar){btnGuardar.disabled=false;btnGuardar.style.opacity="";btnGuardar.title="";}
+  } else {
+    // Titular o Posesionario — mostrar campos titular, ocultar referido
+    if(condDoc)condDoc.style.display="block";
+    if(banner)banner.style.display="none";
+    if(bloqueRefEdit)bloqueRefEdit.style.display="none";
+    // Limpiar referido inline por si venía de No aplica
+    var rn2=document.getElementById("ef-nombreReferidoInline");var rt2=document.getElementById("ef-telefonoReferidoInline");
+    var rm2=document.getElementById("ef-msg-referido-inline");
+    if(rn2)rn2.value="";if(rt2)rt2.value="";if(rm2)rm2.innerText="";
+    camposBloquear.forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=false;el.style.opacity="";}});
+    if(btnGuardar){btnGuardar.disabled=false;btnGuardar.style.opacity="";btnGuardar.title="";}
+  }
+}
+function efToggleServicio(srv){var el=document.getElementById("ef-srv-"+srv);if(!el)return;el.classList.toggle("checked");var ic=document.getElementById("ef-icon-"+srv);if(ic)ic.innerHTML=el.classList.contains("checked")?"✓":"";}
+function efSetServicio(srv,valor){var ok=(String(valor).toLowerCase()==="sí"||String(valor).toLowerCase()==="si");var el=document.getElementById("ef-srv-"+srv);var ic=document.getElementById("ef-icon-"+srv);if(!el)return;if(ok){el.classList.add("checked");if(ic)ic.innerHTML="✓";}else{el.classList.remove("checked");if(ic)ic.innerHTML="";}}
+function efGetServicio(srv){var el=document.getElementById("ef-srv-"+srv);return(el&&el.classList.contains("checked"))?"Sí":"No";}
+
+function abrirEditar(idx){
+  var r=_registrosCache[idx];if(!r)return;
+  _MODO="editar";
+  _editandoFila=r[2];
+
+  // Mostrar header de edición con nombre
+  var hdr=document.getElementById("modo-edicion-header");
+  var tit=document.getElementById("edit-titulo-nombre");
+  var nombre=(efV(r,"nombres")+" "+efV(r,"primerApellido")+" "+efV(r,"segundoApellido")).trim();
+  if(hdr)hdr.style.display="block";
+  if(tit)tit.innerText=nombre||"Sin nombre";
+
+  // Limpiar estado anterior sin tocar el mapa
+  _limpiarFormularioSinMapa();
+
+  // Helper — asigna valor a un campo del formulario principal
+  function s(id,val){var el=document.getElementById(id);if(el)el.value=val||"";}
+
+  // Datos de identificación
+  s("primerApellido",efV(r,"primerApellido"));
+  s("segundoApellido",efV(r,"segundoApellido"));
+  s("nombres",efV(r,"nombres"));
+  s("curp",(efV(r,"curp")||"").toUpperCase());
+  s("edad",efV(r,"edad"));
+  s("telefono",efV(r,"telefono"));
+  // Domicilio
+  s("municipio",efV(r,"municipio"));
+  s("localidad",efV(r,"localidad"));
+  s("colonia",efV(r,"colonia"));
+  s("cp",efV(r,"cp"));
+  s("calle",efV(r,"calle"));
+  s("numExterior",efV(r,"numExterior"));
+  s("numInterior",efV(r,"numInterior"));
+  var _lat=_parsearCoord(efV(r,"latitud"));
+  var _lng=_parsearCoordLng(efV(r,"longitud")); // longitud siempre negativa en Oaxaca
+  s("latitud",_lat);s("longitud",_lng);
+  // Situación social
+  s("personasVivienda",efV(r,"personasVivienda"));
+  s("ingresoMensual",efV(r,"ingresoMensual"));
+  s("personasPrograma",efV(r,"personasPrograma"));
+  s("tipoVivienda",efV(r,"tipoVivienda"));
+  s("jefeFamilia",efV(r,"jefeFamilia"));
+  s("habitantesCarac",efV(r,"habitantesCarac"));
+  // Estructura
+  s("numDormitorios",efV(r,"numDormitorios"));
+  s("espacioConstruccion",efV(r,"espacioConstruccion"));
+  // Predio
+  s("tipoTenenciaPredio",efV(r,"tipoTenenciaPredio"));
+  s("condicionesAcceso",efV(r,"condicionesAcceso"));
+  s("documentoPredio",efV(r,"documentoPredio"));
+  // Materiales
+  s("materialPiso",efV(r,"materialPiso"));
+  s("materialTecho",efV(r,"materialTecho"));
+  s("materialMuros",efV(r,"materialMuros"));
+  // Territorio (solo lectura visual)
+  s("lenguaIndigena",efV(r,"lenguaIndigena"));
+  s("tipoDiscapacidad",efV(r,"tipoDiscapacidad"));
+
+  // Booleanos — usa la función selBool del formulario principal
+  ["hablaLengua","poblacionIndigena","poblacionAfro","tieneDiscapacidad",
+   "danoEstructural","danoNatural","zonaRiesgo"].forEach(function(campo){
+    var val=efV(r,campo);
+    boolValues[campo]=val||null;
+    var sel=document.getElementById("bool-wrap-"+campo);
+    if(sel){sel.value=val||"";sel.classList.remove("bool-si","bool-no","bool-valido");
+      if(val==="Si")sel.classList.add("bool-si","bool-valido");
+      else if(val==="No")sel.classList.add("bool-no","bool-valido");}
+    selBool(campo,val);
+  });
+
+  // Servicios
+  var srvMap={agua:"aguaPotable",drenaje:"drenaje",electricidad:"electricidad",gas:"gas",internet:"internet"};
+  Object.keys(srvMap).forEach(function(srv){
+    var val=String(efV(r,srvMap[srv])||"").toLowerCase();
+    var el=document.getElementById("srv-"+srv);var ic=document.getElementById("icon-"+srv);
+    if(!el)return;
+    if(val==="sí"||val==="si"){el.classList.add("checked");if(ic)ic.innerHTML="✓";}
+    else{el.classList.remove("checked");if(ic)ic.innerHTML="";}
+  });
+
+  // Checkbox llamada
+  var chk=document.getElementById("llamadaRealizada");
+  if(chk){var vL=String(efV(r,"llamadaRealizada")||"").toLowerCase();chk.checked=(vL==="sí"||vL==="si");}
+
+  // Validar CURP cargado (aplica las mismas restricciones que al escribir)
+  var curpEl=document.getElementById("curp");
+  if(curpEl&&curpEl.value){
+    curpEl.value=curpEl.value.toUpperCase().replace(/[^A-Z0-9]/g,"");
+    validarCurp(curpEl);
+  }
+
+  // Lógica condicional del formulario
+  toggleDocumentoPredio();
+  chequearCorteVivienda();
+
+  // Mapa — destruir instancia anterior y rearrancar con las coords correctas
+  var latN=parseFloat(_lat), lngN=parseFloat(_lng);
+  var usarLat = (!isNaN(latN)&&latN!==0) ? latN : null;
+  var usarLng = (!isNaN(lngN)&&lngN!==0) ? lngN : null;
+
+  // Destruir mapa anterior para evitar que quede en posición vieja
+  if(_mapas["mapa-gps"]){
+    try{_mapas["mapa-gps"].map.remove();}catch(e){}
+    delete _mapas["mapa-gps"];
+  }
+
+  setTimeout(function(){
+    if(usarLat&&usarLng){
+      // Hay coords guardadas — mostrar exactamente ahí con zoom de predio
+      _iniciarMapa("mapa-gps",usarLat,usarLng);
+      setTimeout(function(){
+        if(_mapas["mapa-gps"]){
+          _mapas["mapa-gps"].map.setView([usarLat,usarLng],16);
+          _mapas["mapa-gps"].marker.setLatLng([usarLat,usarLng]);
+          _actualizarBadge("mapa-gps",usarLat,usarLng);
+        }
+      },200);
+    } else {
+      // Sin coords — centrar por municipio o por defecto
+      var coords=_coordsMunicipio(efV(r,"municipio"));
+      var lat2=coords?coords[0]:_LAT_DEFAULT;
+      var lng2=coords?coords[1]:_LNG_DEFAULT;
+      _iniciarMapa("mapa-gps",lat2,lng2);
+      // También intentar afinar por CP
+      var cpVal=efV(r,"cp");
+      if(cpVal&&cpVal.length===5){
+        setTimeout(function(){_centrarMapaPorCP(cpVal,"mapa-gps");},500);
+      }
+    }
+  },300);
+
+  // Navegar al formulario (sin barra de progreso en modo edición)
+  var panel=document.getElementById("panel-registros");
+  var cuest=document.getElementById("cuestionario-wrap");
+  var prog=document.getElementById("progress-wrap");
+  if(panel)panel.style.display="none";
+  if(cuest)cuest.style.display="";
+  if(prog)prog.style.display="none";
+  irPaso(1);
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function cerrarEdicion(){
+  _MODO="nuevo";
+  _editandoFila=null;
+  // Ocultar header de edición
+  var hdr=document.getElementById("modo-edicion-header");
+  if(hdr)hdr.style.display="none";
+  // Mostrar registros, ocultar formulario
+  var panel=document.getElementById("panel-registros");
+  var cuest=document.getElementById("cuestionario-wrap");
+  if(panel)panel.style.display="block";
+  if(cuest)cuest.style.display="none";
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function guardarEdicionCompleta(){
+  if(!_editandoFila){alert("No hay registro seleccionado.");return;}
+  var btnGuardar=document.querySelector("#paso-5 .btn-guardar")||document.querySelector(".btn-guardar");
+  if(btnGuardar){btnGuardar.disabled=true;btnGuardar.innerText="⏳ Guardando...";}
+
+  function g(id){var el=document.getElementById(id);return el?el.value.trim():"";}
+
+  var updates={
+    primerApellido:g("primerApellido"), segundoApellido:g("segundoApellido"),
+    nombres:g("nombres"), curp:g("curp").toUpperCase(), edad:g("edad"), telefono:g("telefono"),
+    hablaLengua:boolValues.hablaLengua||"", lenguaIndigena:g("lenguaIndigena"),
+    poblacionIndigena:boolValues.poblacionIndigena||"", poblacionAfro:boolValues.poblacionAfro||"",
+    tieneDiscapacidad:boolValues.tieneDiscapacidad||"", tipoDiscapacidad:g("tipoDiscapacidad"),
+    ingresoMensual:g("ingresoMensual"), calle:g("calle"),
+    numExterior:g("numExterior"), numInterior:g("numInterior"),
+    colonia:g("colonia"), localidad:g("localidad"), municipio:g("municipio"), cp:g("cp"),
+    latitud:_guardarCoord(g("latitud")),
+    longitud:_guardarCoordLng(g("longitud")),
+    personasVivienda:g("personasVivienda"), personasPrograma:g("personasPrograma"),
+    jefeFamilia:g("jefeFamilia"), habitantesCarac:g("habitantesCarac"),
+    tipoVivienda:g("tipoVivienda"), numDormitorios:g("numDormitorios"),
+    materialPiso:g("materialPiso"), materialTecho:g("materialTecho"), materialMuros:g("materialMuros"),
+    aguaPotable:getServicio("agua"), drenaje:getServicio("drenaje"),
+    electricidad:getServicio("electricidad"), gas:getServicio("gas"), internet:getServicio("internet"),
+    danoEstructural:boolValues.danoEstructural||"", danoNatural:boolValues.danoNatural||"",
+    zonaRiesgo:boolValues.zonaRiesgo||"",
+    tipoTenenciaPredio:g("tipoTenenciaPredio"), espacioConstruccion:g("espacioConstruccion"),
+    condicionesAcceso:g("condicionesAcceso"), documentoPredio:g("documentoPredio"),
+    llamadaRealizada:(document.getElementById("llamadaRealizada")&&document.getElementById("llamadaRealizada").checked)?"Sí":""
+  };
+
+  var rowIdx=_editandoFila;
+  var primerNombreEd=(g("nombres").split(" ")[0]||"foto");
+
+  google.script.run
+    .withSuccessHandler(function(){
+      if(btnGuardar){btnGuardar.disabled=false;btnGuardar.innerText="✅ Guardar registro";}
+      cerrarEdicion();
+      mostrarVista("registros");
+    })
+    .withFailureHandler(function(e){
+      if(btnGuardar){btnGuardar.disabled=false;btnGuardar.innerText="✅ Guardar registro";}
+      alert("Error al guardar: "+(e.message||e));
+    })
+    .editarRegistro(rowIdx,updates);
+}
+
+/* ── FOTOS EDICIÓN ── */
+function efPrevisualizarFoto(tipo,input){
+  if(!input.files||!input.files[0])return;
+  var file=input.files[0];
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var prev=document.getElementById("ef-prev-"+tipo);var zona=document.getElementById("ef-zona-"+tipo);var est=document.getElementById("ef-est-"+tipo);
+    if(prev)prev.innerHTML='<img src="'+e.target.result+'" alt="foto '+tipo+'">';
+    if(zona)zona.classList.add("con-foto");if(est)est.innerHTML="✅ Nueva foto lista";
+  };
+  reader.readAsDataURL(file);
+}
+
+function efCargarLinksExistentes(r){
+  // r[43]=FotoFachada  r[44]=FotoInterior  r[45]=FotoEntorno  (base-0, col 44,45,46)
+  var tipos=[{tipo:"fachada",idx:43},{tipo:"interior",idx:44},{tipo:"entorno",idx:45}];
+  for(var i=0;i<tipos.length;i++){
+    var link=r[tipos[i].idx]||"";
+    var linkEl=document.getElementById("ef-link-"+tipos[i].tipo);
+    var zona=document.getElementById("ef-zona-"+tipos[i].tipo);
+    var prev=document.getElementById("ef-prev-"+tipos[i].tipo);
+    var est=document.getElementById("ef-est-"+tipos[i].tipo);
+    var input=document.getElementById("ef-input-"+tipos[i].tipo);
+    if(input)input.value="";
+    if(zona)zona.classList.remove("con-foto");
+    if(est)est.innerHTML="";
+    if(prev)prev.innerHTML='<div class="ef-foto-placeholder"><span style="font-size:28px">'+(tipos[i].tipo==="fachada"?"🏠":tipos[i].tipo==="interior"?"🛋️":"🌳")+'</span><span class="ef-foto-label">'+tipos[i].tipo.charAt(0).toUpperCase()+tipos[i].tipo.slice(1)+'</span><span class="ef-foto-hint">Toca para nueva foto</span></div>';
+    if(link&&linkEl){linkEl.href=link;linkEl.style.display="block";if(zona)zona.classList.add("con-foto");if(est)est.innerHTML='📎 Foto registrada';}
+    else if(linkEl){linkEl.style.display="none";}
+  }
+}
+
+/* ══════════════════════════════════════════════
+   AUTOCOMPLETE — MUNICIPIOS
+══════════════════════════════════════════════ */
+var _municipiosCache=null;
+var _munCargando=false;
+var _munActivoIdx=-1;
+
+function _cargarMunicipios(callback){
+  if(_municipiosCache!==null){callback(_municipiosCache);return;}
+  if(_munCargando){setTimeout(function(){_cargarMunicipios(callback);},200);return;}
+  _munCargando=true;
+  google.script.run
+    .withSuccessHandler(function(res){_municipiosCache=res||[];_munCargando=false;callback(_municipiosCache);})
+    .withFailureHandler(function(e){console.warn("Error municipios:",e);_municipiosCache=[];_munCargando=false;callback([]);})
+    .obtenerMunicipios();
+}
+
+function filtrarMunicipios(inputId,ddId){
+  var inp=document.getElementById(inputId);var dd=document.getElementById(ddId);
+  if(!inp||!dd)return;
+  var q=inp.value.trim();
+  if(q.length<2){dd.style.display="none";_munActivoIdx=-1;return;}
+  _cargarMunicipios(function(lista){
+    var qn=quitarAcentos(q.toLowerCase());var res=[];
+    for(var i=0;i<lista.length&&res.length<12;i++){var n=lista[i].nombre;if(quitarAcentos(n.toLowerCase()).indexOf(qn)!==-1)res.push(lista[i]);}
+    if(res.length===0){dd.style.display="none";_munActivoIdx=-1;return;}
+    _munActivoIdx=-1;
+    var html="";
+    for(var j=0;j<res.length;j++){
+      var m=res[j];var resaltar=m.nombre.replace(new RegExp("("+escapeRegex(q)+")","gi"),"<em>$1</em>");
+      var clave=m.cveEst&&m.cveMun?(m.cveEst+"-"+m.cveMun):"";
+      html+='<div class="mun-item" data-nombre="'+m.nombre.replace(/"/g,"&quot;")+'" data-inputid="'+inputId+'" data-ddid="'+ddId+'" onmousedown="seleccionarMunicipio(this)"><span class="mun-clave">'+clave+'</span><span>'+resaltar+'</span></div>';
+    }
+    dd.innerHTML=html;dd.style.display="block";
+  });
+}
+
+/* ══════════════════════════════════════════════
+   AUTOCOMPLETE — LOCALIDADES Y COLONIAS
+══════════════════════════════════════════════ */
+var _catLocalCache=null;
+var _catLocCargando=false;
+
+function _cargarCatLocal(callback){
+  if(_catLocalCache!==null){callback(_catLocalCache);return;}
+  if(_catLocCargando){setTimeout(function(){_cargarCatLocal(callback);},250);return;}
+  _catLocCargando=true;
+  google.script.run
+    .withSuccessHandler(function(res){_catLocalCache=res||[];_catLocCargando=false;callback(_catLocalCache);})
+    .withFailureHandler(function(e){console.warn("Error catálogo localidades:",e);_catLocalCache=[];_catLocCargando=false;callback([]);})
+    .obtenerCatalogoLocalidades();
+}
+
+function filtrarLocalidades(inputId,ddId,munInputId){
+  var inp=document.getElementById(inputId);var dd=document.getElementById(ddId);
+  if(!inp||!dd)return;
+  var q=inp.value.trim();
+  if(q.length<2){dd.style.display="none";return;}
+  var munFiltro="";
+  if(munInputId){var munEl=document.getElementById(munInputId);if(munEl)munFiltro=quitarAcentos(munEl.value.trim().toLowerCase());}
+  _cargarCatLocal(function(lista){
+    var qn=quitarAcentos(q.toLowerCase());var vistos={};var res=[];
+    for(var i=0;i<lista.length&&res.length<14;i++){
+      var r=lista[i];var loc=String(r[0]||"").trim();
+      if(!loc||vistos[loc])continue;
+      if(munFiltro&&r[3]){if(quitarAcentos(String(r[3]).toLowerCase()).indexOf(munFiltro)===-1)continue;}
+      if(quitarAcentos(loc.toLowerCase()).indexOf(qn)===-1)continue;
+      vistos[loc]=true;res.push({nombre:loc});
+    }
+    if(res.length===0){dd.style.display="none";return;}
+    _munActivoIdx=-1;var html="";
+    for(var j=0;j<res.length;j++){
+      var resaltar=res[j].nombre.replace(new RegExp("("+escapeRegex(q)+")","gi"),"<em>$1</em>");
+      html+='<div class="mun-item" data-nombre="'+res[j].nombre.replace(/"/g,"&quot;")+'" data-inputid="'+inputId+'" data-ddid="'+ddId+'" onmousedown="seleccionarMunicipio(this)">'+resaltar+'</div>';
+    }
+    dd.innerHTML=html;dd.style.display="block";
+  });
+}
+
+function filtrarColonias(inputId,ddId,munInputId,cpInputId){
+  var inp=document.getElementById(inputId);var dd=document.getElementById(ddId);
+  if(!inp||!dd)return;
+  var q=inp.value.trim();
+  if(q.length<2){dd.style.display="none";return;}
+  var munFiltro="";
+  if(munInputId){var munEl=document.getElementById(munInputId);if(munEl)munFiltro=quitarAcentos(munEl.value.trim().toLowerCase());}
+  _cargarCatLocal(function(lista){
+    var qn=quitarAcentos(q.toLowerCase());var res=[];
+    for(var i=0;i<lista.length&&res.length<14;i++){
+      var r=lista[i];var col=String(r[1]||"").trim();
+      if(!col)continue;
+      if(munFiltro&&r[3]){if(quitarAcentos(String(r[3]).toLowerCase()).indexOf(munFiltro)===-1)continue;}
+      if(quitarAcentos(col.toLowerCase()).indexOf(qn)===-1)continue;
+      res.push({nombre:col,cp:String(r[2]||"").trim(),mun:String(r[3]||"").trim()});
+    }
+    if(res.length===0){dd.style.display="none";return;}
+    _munActivoIdx=-1;var html="";
+    for(var j=0;j<res.length;j++){
+      var m=res[j];var resaltar=m.nombre.replace(new RegExp("("+escapeRegex(q)+")","gi"),"<em>$1</em>");
+      var info=(m.cp?"CP "+m.cp:"")+(m.mun?(m.cp?" · ":"")+m.mun:"");
+      html+='<div class="mun-item" data-nombre="'+m.nombre.replace(/"/g,"&quot;")+'" data-cp="'+m.cp+'" data-inputid="'+inputId+'" data-ddid="'+ddId+'" data-cpinputid="'+(cpInputId||"")+'" onmousedown="seleccionarColonia(this)"><div style="flex:1"><div>'+resaltar+'</div>'+(info?'<div style="font-size:11px;color:var(--texto-soft);margin-top:2px">'+info+'</div>':'')+'</div></div>';
+    }
+    dd.innerHTML=html;dd.style.display="block";
+  });
+}
+
+function seleccionarColonia(el){
+  var nombre=el.getAttribute("data-nombre");
+  var cp=el.getAttribute("data-cp");
+  var inputId=el.getAttribute("data-inputid");
+  var ddId=el.getAttribute("data-ddid");
+  var cpId=el.getAttribute("data-cpinputid");
+  var inp=document.getElementById(inputId);
+  var dd=document.getElementById(ddId);
+  if(inp)inp.value=nombre;
+  if(dd)dd.style.display="none";
+  if(cpId&&cp){var cpEl=document.getElementById(cpId);if(cpEl)cpEl.value=cp;}
+  _munActivoIdx=-1;
+
+  // Centrar mapa por CP según contexto
+  if(cp){
+    var mapaId=inputId==="colonia"?'mapa-gps':'mapa-ef-gps';
+    _centrarMapaPorCP(cp,mapaId);
+  }
+}
+
+/* ══════════════════════════════════════════════
+   AUTOCOMPLETE — CALLES
+══════════════════════════════════════════════ */
+var _catCallesCache=null;
+var _catCallesCargando=false;
+
+function _cargarCatCalles(callback){
+  if(_catCallesCache!==null){callback(_catCallesCache);return;}
+  if(_catCallesCargando){setTimeout(function(){_cargarCatCalles(callback);},250);return;}
+  _catCallesCargando=true;
+  google.script.run
+    .withSuccessHandler(function(res){_catCallesCache=res||[];_catCallesCargando=false;callback(_catCallesCache);})
+    .withFailureHandler(function(e){console.warn("Error catálogo calles:",e);_catCallesCache=[];_catCallesCargando=false;callback([]);})
+    .obtenerCatalogoCalles();
+}
+
+function filtrarCalles(inputId,ddId){
+  var inp=document.getElementById(inputId);var dd=document.getElementById(ddId);
+  if(!inp||!dd)return;
+  var q=inp.value.trim();
+  if(q.length<2){dd.style.display="none";return;}
+  _cargarCatCalles(function(lista){
+    var qn=quitarAcentos(q.toLowerCase());var res=[];var vistos={};
+    for(var i=0;i<lista.length&&res.length<14;i++){
+      var nombre=String(lista[i]||"").trim();
+      if(!nombre||vistos[nombre])continue;
+      if(quitarAcentos(nombre.toLowerCase()).indexOf(qn)===-1)continue;
+      vistos[nombre]=true;res.push(nombre);
+    }
+    if(res.length===0){dd.style.display="none";return;}
+    _munActivoIdx=-1;var html="";
+    for(var j=0;j<res.length;j++){
+      var resaltar=res[j].replace(new RegExp("("+escapeRegex(q)+")","gi"),"<em>$1</em>");
+      html+='<div class="mun-item" data-nombre="'+res[j].replace(/"/g,"&quot;")+'" data-inputid="'+inputId+'" data-ddid="'+ddId+'" onmousedown="seleccionarCalle(this)">'+resaltar+'</div>';
+    }
+    dd.innerHTML=html;dd.style.display="block";
+  });
+}
+
+function seleccionarCalle(el){
+  var nombre=el.getAttribute("data-nombre");var inputId=el.getAttribute("data-inputid");var ddId=el.getAttribute("data-ddid");
+  var inp=document.getElementById(inputId);var dd=document.getElementById(ddId);
+  if(inp)inp.value=nombre;if(dd)dd.style.display="none";
+  _munActivoIdx=-1;
+}
+
+/* ── HELPERS DROPDOWN COMPARTIDOS ── */
+function escapeRegex(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
+
+/* ── Coordenadas aproximadas de municipios de Oaxaca para centrar el mapa ── */
+var _COORDS_MUNICIPIOS = {
+  "Oaxaca de Juárez":         [17.0669, -96.7203],
+  "Oaxaca Centro":            [17.0669, -96.7203],
+  "San Juan Bautista Tuxtepec":[18.0892,-96.1197],
+  "Tuxtepec":                 [18.0892, -96.1197],
+  "Salina Cruz":              [16.1796, -95.2003],
+  "Juchitán de Zaragoza":     [16.4336, -95.0244],
+  "Huajuapan de León":        [17.8069, -97.7728],
+  "Tehuantepec":              [16.3219, -95.2425],
+  "Miahuatlán de Porfirio Díaz":[16.3297,-96.5978],
+  "Ocotlán de Morelos":       [16.7931, -96.6750],
+  "Zimatlán de Álvarez":      [16.8712, -96.7875],
+  "Ejutla de Crespo":         [16.5639, -96.7297],
+  "Tlacolula de Matamoros":   [16.9539, -96.4758],
+  "Mitla":                    [16.9258, -96.3444],
+  "Etla":                     [17.2036, -96.7856],
+  "San Pablo Villa de Mitla": [16.9258, -96.3444],
+  "Putla Villa de Guerrero":  [17.0253, -97.9222],
+  "Tlaxiaco":                 [17.2606, -97.6789],
+  "Santa Cruz Xoxocotlán":    [17.0389, -96.7386],
+  "San Martín Mexicápam":     [17.0500, -96.7500],
+  "Heroica Ciudad de Tlaxiaco":[17.2606,-97.6789],
+  "Asunción Nochixtlán":      [17.4553, -97.2244],
+  "Nochixtlán":               [17.4553, -97.2244],
+  "Coixtlahuaca":             [17.7214, -97.3533],
+  "Teposcolula":              [17.5394, -97.4706],
+  "Huajuapan":                [17.8069, -97.7728],
+  "Silacayoápam":             [17.4822, -98.1461],
+  "Acatlán de Pérez Figueroa":[18.2003,-96.6019],
+  "Loma Bonita":              [18.1017, -95.8756],
+  "San Juan Cotzocón":        [17.7239, -95.7914],
+  "Santiago Pinotepa Nacional":[16.3403,-98.0542],
+  "Pinotepa Nacional":        [16.3403, -98.0542],
+  "Jamiltepec":               [16.2831, -97.8228],
+  "Puerto Escondido":         [15.8601, -97.0731],
+  "San Pedro Mixtepec":       [15.8601, -97.0731],
+  "Pochutla":                 [15.7436, -96.4678],
+  "Puerto Ángel":             [15.6667, -96.4833],
+  "Huatulco":                 [15.7669, -96.1344],
+  "Santa María Huatulco":     [15.7669, -96.1344],
+  "Teotitlán del Valle":      [17.0347, -96.5117],
+  "Ixtlán de Juárez":         [17.3339, -96.4861],
+  "Guelatao de Juárez":       [17.3839, -96.4714],
+  "Valle Nacional":           [17.7706, -96.3003],
+  "Cuicatlán":                [17.8003, -96.9614],
+  "Cañada":                   [17.8003, -96.9614],
+  "Teotitlán de Flores Magón":[18.1322,-97.0811],
+  "Abejones":                 [17.2833, -96.2500],
+  "Juquila":                  [16.2333, -97.2833],
+  "Santa Catarina Juquila":   [16.2333, -97.2833]
+};
+
+function _coordsMunicipio(nombre) {
+  if (!nombre) return null;
+  // Búsqueda exacta primero
+  if (_COORDS_MUNICIPIOS[nombre]) return _COORDS_MUNICIPIOS[nombre];
+  // Búsqueda parcial (por si el nombre tiene variantes)
+  var q = nombre.toLowerCase();
+  var keys = Object.keys(_COORDS_MUNICIPIOS);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].toLowerCase().indexOf(q) !== -1 || q.indexOf(keys[i].toLowerCase()) !== -1) {
+      return _COORDS_MUNICIPIOS[keys[i]];
+    }
+  }
+  return null;
+}
+
+function seleccionarMunicipio(el){
+  var nombre=el.getAttribute("data-nombre");
+  var inputId=el.getAttribute("data-inputid");
+  var ddId=el.getAttribute("data-ddid");
+  var inp=document.getElementById(inputId);
+  var dd=document.getElementById(ddId);
+  if(inp)inp.value=nombre;
+  if(dd)dd.style.display="none";
+  _munActivoIdx=-1;
+  var wrapperId=inputId==="municipio"?"campo-municipio":null;
+  if(wrapperId){var w=document.getElementById(wrapperId);if(w){w.classList.add("valido");w.classList.remove("error");}}
+
+  // Centrar mapa en el municipio seleccionado (solo en formulario nuevo, no en edición)
+  if(inputId==="municipio"){
+    var coords=_coordsMunicipio(nombre);
+    if(coords&&_mapas&&_mapas['mapa-gps']){
+      // Mapa ya iniciado — centrar con zoom de municipio (13)
+      _mapas['mapa-gps'].map.setView(coords, 13);
+    } else if(coords){
+      // Mapa no iniciado aún — guardarlo para cuando se inicie
+      _LAT_DEFAULT=coords[0];
+      _LNG_DEFAULT=coords[1];
+      // Iniciar si el paso 1 está activo
+      var mapaEl=document.getElementById('mapa-gps');
+      if(mapaEl&&mapaEl.offsetParent!==null){
+        _iniciarMapa('mapa-gps',coords[0],coords[1]);
+      }
+    }
+  }
+}
+
+function cerrarMunDropdown(ddId){
+  setTimeout(function(){var dd=document.getElementById(ddId);if(dd)dd.style.display="none";_munActivoIdx=-1;},180);
+}
+
+function navMunDropdown(e,ddId){
+  var dd=document.getElementById(ddId);
+  if(!dd||dd.style.display==="none")return;
+  var items=dd.querySelectorAll(".mun-item");
+  if(!items.length)return;
+  if(e.key==="ArrowDown"){e.preventDefault();_munActivoIdx=Math.min(_munActivoIdx+1,items.length-1);}
+  else if(e.key==="ArrowUp"){e.preventDefault();_munActivoIdx=Math.max(_munActivoIdx-1,0);}
+  else if(e.key==="Enter"&&_munActivoIdx>=0){e.preventDefault();items[_munActivoIdx].dispatchEvent(new MouseEvent("mousedown"));return;}
+  else if(e.key==="Escape"){dd.style.display="none";_munActivoIdx=-1;return;}
+  items.forEach(function(it,i){it.classList.toggle("activo",i===_munActivoIdx);});
+  if(_munActivoIdx>=0)items[_munActivoIdx].scrollIntoView({block:"nearest"});
+}
+
+/* ══════════════════════════════════════════════
+   MAPA LEAFLET — cdnjs, sin integrity para Apps Script
+══════════════════════════════════════════════ */
+var _mapas = {};
+var _LAT_DEFAULT = 17.0669;
+var _LNG_DEFAULT = -96.7203;
+
+function _leafletDisponible(){return typeof L!=='undefined';}
+
+function _iniciarMapa(mapaId,lat,lng){
+  if(!_leafletDisponible()){console.warn('Leaflet no cargado');return;}
+  lat=parseFloat(lat)||_LAT_DEFAULT;
+  lng=parseFloat(lng)||_LNG_DEFAULT;
+  if(_mapas[mapaId]){
+    _mapas[mapaId].map.setView([lat,lng],15);
+    _mapas[mapaId].marker.setLatLng([lat,lng]);
+    _actualizarBadge(mapaId,lat,lng);
+    setTimeout(function(){_mapas[mapaId].map.invalidateSize();},80);
+    return;
+  }
+  var contenedor=document.getElementById(mapaId);
+  if(!contenedor)return;
+  var map=L.map(mapaId,{center:[lat,lng],zoom:15,attributionControl:false});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  var icono=L.divIcon({className:'',html:'<div style="width:22px;height:22px;background:#7B1D3F;border:3px solid white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,.4)"></div>',iconSize:[22,22],iconAnchor:[11,22]});
+  var marker=L.marker([lat,lng],{draggable:true,icon:icono}).addTo(map);
+  var latId=mapaId==='mapa-gps'?'latitud':'ef-latitud';
+  var lngId=mapaId==='mapa-gps'?'longitud':'ef-longitud';
+  function actualizarInputs(ll){
+    var a=document.getElementById(latId);var b=document.getElementById(lngId);
+    if(a)a.value=ll.lat.toFixed(6);if(b)b.value=ll.lng.toFixed(6);
+    _actualizarBadge(mapaId,ll.lat,ll.lng);
+  }
+  marker.on('dragend',function(){actualizarInputs(marker.getLatLng());});
+  map.on('click',function(e){marker.setLatLng(e.latlng);actualizarInputs(e.latlng);});
+  _mapas[mapaId]={map:map,marker:marker};
+  _actualizarBadge(mapaId,lat,lng);
+  setTimeout(function(){map.invalidateSize();},120);
+}
+
+function _actualizarBadge(mapaId,lat,lng){
+  var b=document.getElementById(mapaId+'-badge');
+  if(b)b.innerText=parseFloat(lat).toFixed(5)+', '+parseFloat(lng).toFixed(5);
+}
+
+function centrarMapaEnUbicacion(mapaId,latId,lngId){
+  var lat=parseFloat((document.getElementById(latId)||{}).value)||_LAT_DEFAULT;
+  var lng=parseFloat((document.getElementById(lngId)||{}).value)||_LNG_DEFAULT;
+  _iniciarMapa(mapaId,lat,lng);
+}
+
+function actualizarMapaDesdeInputs(mapaId,latId,lngId){
+  if(!_mapas[mapaId])return;
+  var lat=parseFloat((document.getElementById(latId)||{}).value);
+  var lng=parseFloat((document.getElementById(lngId)||{}).value);
+  if(!isNaN(lat)&&!isNaN(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180){
+    _mapas[mapaId].map.setView([lat,lng],15);
+    _mapas[mapaId].marker.setLatLng([lat,lng]);
+    _actualizarBadge(mapaId,lat,lng);
+  }
+}
+
+function obtenerGPS(){
+  if(!navigator.geolocation){alert('Geolocalización no disponible');return;}
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var lat=pos.coords.latitude.toFixed(6);var lng=pos.coords.longitude.toFixed(6);
+    var a=document.getElementById('latitud');var b=document.getElementById('longitud');
+    if(a)a.value=lat;if(b)b.value=lng;
+    marcarVerde('latitud');marcarVerde('longitud');
+    _iniciarMapa('mapa-gps',lat,lng);
+  },function(){alert('No se pudo obtener la ubicación');});
+}
+
+function obtenerGPSEd(){
+  if(!navigator.geolocation){alert('Geolocalización no disponible');return;}
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var lat=pos.coords.latitude.toFixed(6);var lng=pos.coords.longitude.toFixed(6);
+    var a=document.getElementById('ef-latitud');var b=document.getElementById('ef-longitud');
+    if(a)a.value=lat;if(b)b.value=lng;
+    _iniciarMapa('mapa-ef-gps',lat,lng);
+  },function(){alert('No se pudo obtener la ubicación');});
+}
+
+function _intentarMostrarMapaEdicion(lat,lng){
+  if(_mapas['mapa-ef-gps']){try{_mapas['mapa-ef-gps'].map.remove();}catch(e){}delete _mapas['mapa-ef-gps'];}
+  var latN=parseFloat(lat);var lngN=parseFloat(lng);
+  var usarLat=(!isNaN(latN)&&latN!==0)?latN:_LAT_DEFAULT;
+  var usarLng=(!isNaN(lngN)&&lngN!==0)?lngN:_LNG_DEFAULT;
+  setTimeout(function(){_iniciarMapa('mapa-ef-gps',usarLat,usarLng);},250);
+}
+
+function _resetearMapaNuevo(){
+  if(_mapas['mapa-gps']){try{_mapas['mapa-gps'].map.remove();}catch(e){}delete _mapas['mapa-gps'];}
+  var badge=document.getElementById('mapa-gps-badge');if(badge)badge.innerText='';
+  setTimeout(function(){_iniciarMapa('mapa-gps',_LAT_DEFAULT,_LNG_DEFAULT);},100);
+}
+
+/* ══════════════════════════════════════════════
+   GEOCODING POR CP — Nominatim (OpenStreetMap)
+   Gratuito, sin API key.
+   Cache local para no repetir peticiones iguales.
+══════════════════════════════════════════════ */
+var _cpCache = {}; // { "68000": [lat, lng] }
+
+function _centrarMapaPorCP(cp, mapaId) {
+  if (!cp || cp.length < 4) return;
+  cp = String(cp).trim();
+  if (!mapaId) mapaId = 'mapa-gps';
+
+  // Si ya está en caché, centrar directo
+  if (_cpCache[cp]) {
+    _centrarMapaEnCoords(mapaId, _cpCache[cp][0], _cpCache[cp][1], 15);
+    return;
+  }
+
+  // Llamar a Nominatim (OpenStreetMap) — sin API key, sin costo
+  // country=mx para limitar a México y mejorar precisión
+  var url = 'https://nominatim.openstreetmap.org/search'
+          + '?postalcode=' + encodeURIComponent(cp)
+          + '&country=mx'
+          + '&format=json'
+          + '&limit=1';
+
+  fetch(url, { headers: { 'Accept-Language': 'es' } })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data && data.length > 0) {
+        var lat = parseFloat(data[0].lat);
+        var lng = parseFloat(data[0].lon);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          _cpCache[cp] = [lat, lng]; // guardar en caché
+          _centrarMapaEnCoords(mapaId, lat, lng, 15);
+        }
+      }
+    })
+    .catch(function(e){ console.warn('Nominatim CP error:', e); });
+}
+
+function _centrarMapaEnCoords(mapaId, lat, lng, zoom) {
+  if (_mapas[mapaId]) {
+    _mapas[mapaId].map.setView([lat, lng], zoom || 15);
+    // NO mover el marcador — solo el encuadre del mapa
+    // El marcador se mueve solo cuando el usuario hace clic o arrastra
+  } else {
+    // Mapa no iniciado: actualizar defaults y arrancar
+    _LAT_DEFAULT = lat;
+    _LNG_DEFAULT = lng;
+    _iniciarMapa(mapaId, lat, lng);
+  }
+}
+
+/* ══════════════════════════════════════════════
+   CONFIGURACIÓN — Territorio
+══════════════════════════════════════════════ */
+
+// Aplica el estado habilitado/deshabilitado del territorio al paso 6
+function _aplicarEstadoTerritorio(activo){
+  SESION.territorioActivo=activo;
+  var paso6=document.getElementById("paso-6");
+  if(!paso6)return;
+
+  // Banners
+  var bBloq=document.getElementById("banner-territorio-bloqueado");
+  var bActivo=document.getElementById("banner-territorio-activo");
+  if(bBloq)bBloq.style.display=activo?"none":"block";
+  if(bActivo)bActivo.style.display=activo?"block":"none";
+
+  // Todas las cards del territorio
+  paso6.querySelectorAll(".card-territorio").forEach(function(card){
+    if(activo){
+      // Quitar bloqueo visual
+      card.style.opacity="1";
+      card.style.pointerEvents="auto";
+      // Habilitar inputs, selects, textareas
+      card.querySelectorAll("input,select,textarea").forEach(function(el){
+        el.removeAttribute("disabled");
+        el.style.opacity="";
+        el.style.pointerEvents="";
+      });
+      // Habilitar foto-zonas
+      card.querySelectorAll(".foto-zona").forEach(function(el){
+        el.style.opacity="1";
+        el.style.pointerEvents="auto";
+        el.style.cursor="pointer";
+      });
+      // Habilitar servicios
+      card.querySelectorAll(".servicio-check").forEach(function(el){
+        el.style.pointerEvents="auto";
+        el.style.cursor="pointer";
+      });
+    } else {
+      // Bloquear visualmente
+      card.style.opacity="0.5";
+      card.style.pointerEvents="none";
+    }
+  });
+}
+
+function toggleTerritorioConfig(activo){
+  // Actualizar visual del slider
+  var slider=document.getElementById("config-territorio-slider");
+  var knob=document.getElementById("config-slider-knob");
+  var estado=document.getElementById("config-territorio-estado");
+  var capTxt=document.getElementById("config-cap-estado-txt");
+  var capCard=document.getElementById("config-estado-capturista");
+  if(slider){slider.style.background=activo?"var(--verde)":"#ccc";}
+  if(knob){knob.style.transform=activo?"translateX(24px)":"translateX(0)";}
+  if(estado){
+    estado.style.background=activo?"#e6f4ed":"#fff3f3";
+    estado.style.border="1px solid "+(activo?"var(--verde)":"var(--rojo)");
+    estado.style.color=activo?"var(--verde)":"var(--rojo)";
+    estado.innerText=activo?"✅ Los capturistas podrán ver y llenar la sección de territorio.":"🔒 La sección de territorio está desactivada para los capturistas.";
+  }
+  if(capTxt)capTxt.innerText=activo?"✅ Habilitado":"🔒 Deshabilitado";
+  if(capCard){capCard.style.background=activo?"#e6f4ed":"var(--crema-dark)";capCard.style.border="1px solid "+(activo?"var(--verde)":"var(--borde)");}
+}
+
+function guardarConfigTerritorioAhora(){
+  var check=document.getElementById("config-territorio-check");
+  var activo=check?check.checked:false;
+  var btn=document.getElementById("btn-guardar-config");
+  if(btn){btn.disabled=true;btn.innerText="⏳ Guardando...";}
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(btn){btn.disabled=false;btn.innerText="💾 Guardar configuración";}
+      if(res&&res.ok){
+        alert("✅ Configuración guardada. Los capturistas verán el cambio al iniciar sesión.");
+      }
+    })
+    .withFailureHandler(function(e){
+      if(btn){btn.disabled=false;btn.innerText="💾 Guardar configuración";}
+      alert("Error al guardar: "+(e.message||e));
+    })
+    .guardarConfig({territorioActivo:activo});
+}
+
+function _cargarPanelConfig(){
+  // Cargar estado actual desde el servidor
+  var check=document.getElementById("config-territorio-check");
+  google.script.run
+    .withSuccessHandler(function(cfg){
+      var activo=cfg&&cfg.territorioActivo;
+      if(check)check.checked=activo;
+      toggleTerritorioConfig(activo);
+    })
+    .withFailureHandler(function(){
+      if(check)check.checked=false;
+      toggleTerritorioConfig(false);
+    })
+    .obtenerConfig();
+}
+
+
+window.addEventListener("load",function(){
+  // Advertencia al cerrar/cambiar pestaña si hay datos capturados
+  window.addEventListener("beforeunload",function(e){
+    if(_hayDatosCapturados()){
+      e.preventDefault();
+      e.returnValue="Tienes información capturada que no has guardado. ¿Seguro que deseas salir?";
+      return e.returnValue;
+    }
+  });
+
+  if(typeof google==="undefined"){
+    document.getElementById("login-wrap").style.display="none";
+    document.getElementById("app-wrap").style.display="block";
+    SESION.nombre="Demo";
+    document.getElementById("topbar-usuario").innerText="Demo";
+    mostrarVista("inicio");
+  }
+});
+</script>

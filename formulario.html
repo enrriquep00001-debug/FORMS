@@ -1,0 +1,956 @@
+<!-- LOGIN -->
+<div id="login-wrap">
+  <div class="login-box">
+    <div class="login-eyebrow">Sistema de Captura</div>
+    <div class="login-title">Registro de<br>Beneficiarios</div>
+    <div class="login-divider"></div>
+    <div class="login-field">
+      <label>Usuario</label>
+      <input id="usuario" type="text" placeholder="Tu usuario" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input id="password" type="password" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') login()">
+    </div>
+    <button class="login-btn" onclick="login()">Ingresar al sistema</button>
+    <div class="login-error" id="loginError"></div>
+    <div class="login-eyebrow">Departamento de Seguimiento</div>
+    <div class="login-eyebrow">Vinculación con el territorio</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app-wrap">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-brand"><span>📋 Registro de Beneficiarios</span></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn-tab-top activo" id="tab-inicio" onclick="mostrarVista('inicio')">🏠 Inicio</button>
+      <button class="btn-tab-top" id="tab-cuestionario" onclick="mostrarVista('cuestionario')">📝 Nuevo registro</button>
+      <button class="btn-tab-top" id="tab-registros" onclick="mostrarVista('registros')">🗂️ Registros</button>
+      <button class="btn-tab-top" id="tab-config" onclick="mostrarVista('config')" style="display:none">⚙️ Configuración</button>
+      <span class="topbar-user" id="topbar-usuario" style="margin-left:6px"></span>
+      <button class="btn-salir" onclick="logout()">Salir</button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-steps" id="progressSteps"></div>
+  </div>
+
+  <!-- ══ PANTALLA DE INICIO ══ -->
+  <div id="pantalla-inicio" style="max-width:900px;margin:0 auto;padding:32px 20px 80px">
+
+    <!-- Encabezado -->
+    <div style="margin-bottom:32px">
+      <div style="font-family:'Sora',sans-serif;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--dorado);margin-bottom:6px">Sistema de captura — Modo actual</div>
+      <div style="font-family:'Sora',sans-serif;font-size:26px;font-weight:800;color:var(--guinda);line-height:1.2;margin-bottom:10px">Registro de Beneficiarios</div>
+      <div style="background:linear-gradient(90deg,var(--guinda),var(--guinda-mid));color:white;display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:20px;font-size:12px;font-weight:700;font-family:'Sora',sans-serif;margin-bottom:6px">
+        📞 ETAPA ACTUAL: Captura por llamada telefónica
+      </div>
+      <div style="font-size:13px;color:var(--texto-soft);line-height:1.6;max-width:640px">
+        Actualmente solo está habilitada la sección de captura <strong>por llamada telefónica</strong>. La sección de territorio estará disponible más adelante, cuando los capturistas realicen visitas de campo.
+      </div>
+    </div>
+
+    <!-- Flujo de captura -->
+    <div style="background:white;border-radius:14px;border:1px solid var(--borde);padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(123,29,63,.06)">
+      <div style="font-family:'Sora',sans-serif;font-size:13px;font-weight:700;color:var(--guinda);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;padding-bottom:10px;border-bottom:1px solid var(--crema-dark)">📋 ¿Cómo funciona la captura?</div>
+
+      <!-- Flujo visual -->
+      <div style="display:flex;gap:0;flex-wrap:wrap;align-items:flex-start;margin-bottom:24px">
+
+        <!-- Paso A -->
+        <div style="flex:1;min-width:140px;text-align:center;padding:0 8px">
+          <div style="width:48px;height:48px;background:var(--guinda);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 8px">📞</div>
+          <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:var(--guinda);margin-bottom:4px">1. LLAMADA</div>
+          <div style="font-size:12px;color:var(--texto-soft);line-height:1.5">Captura Nombre, Domicilio, Situación social, Espacio, Predio y Materiales</div>
+          <div style="margin-top:8px;background:var(--crema-dark);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;color:var(--guinda)">✅ HABILITADO</div>
+        </div>
+
+        <div style="display:flex;align-items:center;padding-top:24px;color:var(--borde);font-size:24px;flex-shrink:0">→</div>
+
+        <!-- Corte 1 -->
+        <div style="flex:1;min-width:120px;text-align:center;padding:0 8px">
+          <div style="width:48px;height:48px;background:#fff3f3;border:2px solid var(--rojo);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto 8px">⛔</div>
+          <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:var(--rojo);margin-bottom:4px">POSIBLE CORTE</div>
+          <div style="font-size:12px;color:var(--texto-soft);line-height:1.5">Vivienda rentada/prestada o predio sin titular → registro se guarda y termina</div>
+        </div>
+
+        <div style="display:flex;align-items:center;padding-top:24px;color:var(--borde);font-size:24px;flex-shrink:0">→</div>
+
+        <!-- Paso B -->
+        <div style="flex:1;min-width:140px;text-align:center;padding:0 8px">
+          <div style="width:48px;height:48px;background:#e8e8e8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 8px">🏠</div>
+          <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:#999;margin-bottom:4px">2. TERRITORIO</div>
+          <div style="font-size:12px;color:var(--texto-soft);line-height:1.5">Diversidad, daños, servicios, zona de riesgo y fotos en visita de campo</div>
+          <div style="margin-top:8px;background:#f0f0f0;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;color:#999">🔒 PRÓXIMAMENTE</div>
+        </div>
+
+        <div style="display:flex;align-items:center;padding-top:24px;color:var(--borde);font-size:24px;flex-shrink:0">→</div>
+
+        <!-- Fin -->
+        <div style="flex:1;min-width:120px;text-align:center;padding:0 8px">
+          <div style="width:48px;height:48px;background:var(--verde);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 8px">✅</div>
+          <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:var(--verde);margin-bottom:4px">REGISTRO COMPLETO</div>
+          <div style="font-size:12px;color:var(--texto-soft);line-height:1.5">Beneficiario registrado y disponible para consulta y edición posterior</div>
+        </div>
+      </div>
+
+      <!-- Notas -->
+      <div style="background:var(--crema-dark);border-radius:10px;padding:16px 18px">
+        <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:var(--guinda);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">📌 Notas importantes</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="font-size:12px;color:var(--texto);line-height:1.6">⚠️ <strong>Corte automático</strong> si la vivienda es <em>rentada</em> o <em>prestada</em> — el sistema guarda lo capturado y termina el registro.</div>
+          <div style="font-size:12px;color:var(--texto);line-height:1.6">⛔ <strong>No aplica</strong> si el solicitante no es propietario ni posesionario — se guarda referido y se inicia nuevo registro.</div>
+          <div style="font-size:12px;color:var(--texto);line-height:1.6">✏️ <strong>Edición posterior</strong> — puedes regresar en cualquier momento a la sección de Registros para editar o agregar información.</div>
+          <div style="font-size:12px;color:var(--texto);line-height:1.6">🔒 <strong>Sección Territorio</strong> — Los campos de diversidad, daños, fotos y servicios estarán habilitados más adelante en visita de campo.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cómo buscar y editar -->
+    <div style="background:white;border-radius:14px;border:1px solid var(--borde);padding:28px;margin-bottom:24px;box-shadow:0 2px 12px rgba(123,29,63,.06)">
+      <div style="font-family:'Sora',sans-serif;font-size:13px;font-weight:700;color:var(--guinda);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--crema-dark)">🔍 ¿Cómo buscar y editar un beneficiario?</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div style="font-size:13px;color:var(--texto);line-height:1.8">
+            <strong style="color:var(--guinda)">1.</strong> Ve a la sección <strong>🗂️ Registros</strong> en la barra superior.<br>
+            <strong style="color:var(--guinda)">2.</strong> Escribe parte del nombre o apellido en el buscador — <em>no es necesario escribirlo completo</em>.<br>
+            <strong style="color:var(--guinda)">3.</strong> Por ejemplo: escribe <strong>"Marga"</strong> y aparecerán resultados como <em>Margarita Alejández Ventura</em>.<br>
+            <strong style="color:var(--guinda)">4.</strong> Selecciona el registro correcto y toca <strong>✏️ Editar</strong>.
+          </div>
+        </div>
+        <div style="background:var(--crema-dark);border-radius:10px;padding:14px 16px">
+          <div style="font-family:'Sora',sans-serif;font-size:11px;font-weight:700;color:var(--guinda);margin-bottom:8px">💡 Ejemplo de búsqueda</div>
+          <div style="background:white;border:1.5px solid var(--guinda);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--texto-soft);margin-bottom:6px">🔍 <em>Margari</em></div>
+          <div style="font-size:12px;color:var(--texto-soft);margin-bottom:4px">Resultados:</div>
+          <div style="background:white;border-radius:6px;padding:6px 10px;font-size:12px;margin-bottom:3px;border-left:3px solid var(--verde)">✔ <strong>Alejández Ventura</strong>, Margarita</div>
+          <div style="background:white;border-radius:6px;padding:6px 10px;font-size:12px;border-left:3px solid var(--borde);color:var(--texto-soft)">○ Margarito Ruiz López</div>
+          <div style="font-size:11px;color:var(--texto-soft);margin-top:6px">Selecciona el correcto y pulsa ✏️ Editar</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Accesos rápidos -->
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <button onclick="mostrarVista('cuestionario')" style="flex:1;min-width:200px;padding:18px 24px;background:var(--guinda);color:white;border:none;border-radius:12px;font-family:'Sora',sans-serif;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(123,29,63,.25);text-align:left;line-height:1.4">
+        📝 Capturar nuevo beneficiario<br><span style="font-weight:400;font-size:12px;opacity:.8">Iniciar registro por llamada telefónica</span>
+      </button>
+      <button onclick="mostrarVista('registros')" style="flex:1;min-width:200px;padding:18px 24px;background:white;color:var(--guinda);border:2px solid var(--guinda);border-radius:12px;font-family:'Sora',sans-serif;font-weight:700;font-size:14px;cursor:pointer;text-align:left;line-height:1.4">
+        🗂️ Ver y editar registros<br><span style="font-weight:400;font-size:12px;color:var(--texto-soft)">Buscar, consultar y modificar datos</span>
+      </button>
+    </div>
+
+  </div><!-- /pantalla-inicio -->
+
+  <!-- Cuestionario — sirve para NUEVO y para EDITAR -->
+  <div class="cuestionario-wrap" id="cuestionario-wrap">
+
+    <!-- Header de modo edición (oculto en modo nuevo) -->
+    <div id="modo-edicion-header" style="display:none;background:white;border-bottom:1px solid var(--borde);padding:14px 20px;margin-bottom:0;display:none">
+      <div style="max-width:860px;margin:0 auto;display:flex;align-items:center;gap:14px">
+        <button onclick="cerrarEdicion()" class="btn-prev" style="flex-shrink:0">← Volver a registros</button>
+        <div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--dorado)">Editando registro</div>
+          <div style="font-family:'Sora',sans-serif;font-size:17px;font-weight:800;color:var(--guinda)" id="edit-titulo-nombre"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ PASO 1: Nombre + Domicilio (POR LLAMADA) ══════════ -->
+    <div class="seccion" id="paso-1">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 1 de 6 — Por llamada</div>
+        <div class="seccion-titulo">Nombre y domicilio</div>
+      </div>
+
+      <div class="card-campos">
+        <h3>Nombre completo</h3>
+        <div class="grid-3">
+          <div class="campo" id="campo-primerApellido">
+            <label>Primer apellido *</label>
+            <input id="primerApellido" type="text" placeholder="Apellido paterno"
+              oninput="soloTexto(this);capitalizarCampo(this);validarCampoVivo('primerApellido')" onblur="soloTexto(this);capitalizarCampo(this);validarCampoVivo('primerApellido')">
+            <span class="campo-msg" id="msg-primerApellido"></span>
+          </div>
+          <div class="campo" id="campo-segundoApellido">
+            <label>Segundo apellido</label>
+            <input id="segundoApellido" type="text" placeholder="Apellido materno"
+              oninput="soloTexto(this);capitalizarCampo(this);marcarVerde('segundoApellido')" onblur="soloTexto(this);capitalizarCampo(this);marcarVerde('segundoApellido')">
+          </div>
+          <div class="campo" id="campo-nombres">
+            <label>Nombre(s) *</label>
+            <input id="nombres" type="text" placeholder="Nombre(s)"
+              oninput="capitalizarCampo(this);soloTexto(this);validarCampoVivo('nombres')" onblur="capitalizarCampo(this);validarCampoVivo('nombres')">
+            <span class="campo-msg" id="msg-nombres"></span>
+          </div>
+        </div>
+        <div class="grid-3" style="margin-top:16px">
+          <div class="campo" id="campo-curp">
+            <label>CURP</label>
+            <input id="curp" type="text" maxlength="18" placeholder="Ej. GODE561231HDFRRN09"
+              oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'');validarCurp(this)"
+              onblur="validarCurp(this)">
+            <span class="campo-msg" id="msg-curp"></span>
+          </div>
+          <div class="campo" id="campo-edad">
+            <label>Edad (mínimo 18 años) *</label>
+            <input id="edad" type="text" inputmode="numeric" maxlength="3" placeholder="Años"
+              oninput="soloNumeroEntero(this);validarCampoVivo('edad')" onblur="validarCampoVivo('edad')">
+            <span class="campo-msg" id="msg-edad"></span>
+          </div>
+          <div class="campo" id="campo-telefono">
+            <label>Teléfono (10 dígitos)</label>
+            <input id="telefono" type="text" inputmode="numeric" maxlength="10" placeholder="10 dígitos"
+              oninput="soloNumeroEntero(this);validarCampoVivo('telefono')" onblur="validarCampoVivo('telefono')">
+            <span class="campo-msg" id="msg-telefono"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-campos">
+        <h3>Domicilio</h3>
+        <!-- 1. Municipio primero → centra el mapa -->
+        <div class="campo">
+          <label>Municipio</label>
+          <div class="mun-wrap">
+            <input id="municipio" type="text" autocomplete="off" placeholder="Escribe para buscar municipio…"
+              oninput="filtrarMunicipios('municipio','municipio-dd')"
+              onblur="cerrarMunDropdown('municipio-dd')"
+              onkeydown="navMunDropdown(event,'municipio-dd')">
+            <div id="municipio-dd" class="mun-dropdown" style="display:none"></div>
+          </div>
+        </div>
+        <!-- 2. Localidad -->
+        <div class="campo" style="margin-top:14px">
+          <label>Localidad</label>
+          <div class="mun-wrap">
+            <input id="localidad" type="text" autocomplete="off" placeholder="Escribe para buscar localidad…"
+              oninput="filtrarLocalidades('localidad','localidad-dd','municipio')"
+              onblur="cerrarMunDropdown('localidad-dd')"
+              onkeydown="navMunDropdown(event,'localidad-dd')">
+            <div id="localidad-dd" class="mun-dropdown" style="display:none"></div>
+          </div>
+        </div>
+        <!-- 3. Colonia + CP → al seleccionar colonia ya trae CP y centra mapa -->
+        <div class="grid-2" style="margin-top:14px">
+          <div class="campo">
+            <label>Colonia</label>
+            <div class="mun-wrap">
+              <input id="colonia" type="text" autocomplete="off" placeholder="Escribe para buscar colonia…"
+                oninput="filtrarColonias('colonia','colonia-dd','municipio','cp')"
+                onblur="cerrarMunDropdown('colonia-dd')"
+                onkeydown="navMunDropdown(event,'colonia-dd')">
+              <div id="colonia-dd" class="mun-dropdown" style="display:none"></div>
+            </div>
+          </div>
+          <div class="campo"><label>Código postal</label><input id="cp" type="text" inputmode="numeric" maxlength="5" placeholder="5 dígitos" oninput="soloNumeroEntero(this);marcarVerde('cp');if(this.value.length===5)_centrarMapaPorCP(this.value,'mapa-gps')"></div>
+        </div>
+        <!-- 4. Calle -->
+        <div class="campo" id="campo-calle" style="margin-top:14px">
+          <label>Calle o vialidad</label>
+          <div class="mun-wrap">
+            <input id="calle" type="text" autocomplete="off" placeholder="Escribe para buscar calle…"
+              oninput="filtrarCalles('calle','calle-dd')"
+              onblur="cerrarMunDropdown('calle-dd')"
+              onkeydown="navMunDropdown(event,'calle-dd')">
+            <div id="calle-dd" class="mun-dropdown" style="display:none"></div>
+          </div>
+        </div>
+        <!-- 5. Números exterior e interior -->
+        <div class="grid-4" style="margin-top:14px">
+          <div class="campo" id="campo-numExterior">
+            <label>Número exterior</label>
+            <input id="numExterior" oninput="marcarVerde('numExterior')" type="text" placeholder="Ej. 23">
+          </div>
+          <div class="campo" style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px">
+              <input type="checkbox" id="sinNumExt" onchange="toggleSinNum('ext')" style="width:auto"> S/N exterior
+            </label>
+          </div>
+          <div class="campo" id="campo-numInterior">
+            <label>Número interior</label>
+            <input id="numInterior" oninput="marcarVerde('numInterior')" type="text" placeholder="Ej. 4-B">
+          </div>
+          <div class="campo" style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px">
+              <input type="checkbox" id="sinNumInt" onchange="toggleSinNum('int')" style="width:auto"> S/N interior
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-campos">
+        <h3>📍 Ubicación en mapa</h3>
+
+        <!-- Comentario de uso -->
+        <div style="background:var(--crema-dark);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--texto);line-height:1.7">
+          Puedes ubicar el predio de <strong>dos formas</strong> — usa la que prefieras:<br>
+          <span style="color:var(--guinda)">🏠 Por dirección:</span> conforme capturas el municipio, colonia y CP el mapa se va acercando automáticamente.<br>
+          <span style="color:var(--rojo)">📍 Mi ubicación:</span> usa el GPS del dispositivo — <strong>solo si estás físicamente en el predio</strong>.
+        </div>
+
+        <!-- Tabs de modo -->
+        <div style="display:flex;gap:0;border:1.5px solid var(--borde);border-radius:8px;overflow:hidden;margin-bottom:14px">
+          <button id="modo-btn-direccion" onclick="activarModoUbicacion('direccion')"
+            style="flex:1;padding:10px 12px;background:var(--guinda);color:white;border:none;font-family:'Sora',sans-serif;font-size:13px;font-weight:700;cursor:pointer">
+            🏠 Por dirección capturada
+          </button>
+          <button id="modo-btn-gps" onclick="activarModoUbicacion('gps')"
+            style="flex:1;padding:10px 12px;background:white;color:var(--texto-soft);border:none;border-left:1.5px solid var(--borde);font-family:'Sora',sans-serif;font-size:13px;font-weight:700;cursor:pointer">
+            📍 Obtener mi ubicación actual
+          </button>
+        </div>
+
+        <!-- Nota modo dirección -->
+        <div id="nota-modo-direccion" style="background:#f0faf4;border:1.5px solid var(--verde);border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:13px;color:var(--texto);line-height:1.6">
+          El mapa se acerca automáticamente al capturar <strong>municipio → colonia → CP</strong>. Afina el punto tocando el mapa o arrastrando el marcador.
+        </div>
+        <!-- Nota modo GPS -->
+        <div id="nota-modo-gps" style="display:none;background:#fff3f3;border:1.5px solid var(--rojo);border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:13px;color:var(--rojo);line-height:1.6">
+          ⚠️ <strong>Solo si estás físicamente en el predio.</strong> Registrará la ubicación de este dispositivo. Si capturas por llamada, usa "Por dirección".
+        </div>
+
+        <!-- Mapa -->
+        <div class="mapa-wrap" id="mapa-gps-wrap">
+          <div id="mapa-gps" style="height:280px"></div>
+          <div class="mapa-coords-badge" id="mapa-gps-badge"></div>
+        </div>
+        <div style="font-size:14px;color:var(--texto-soft);margin-top:10px;margin-bottom:16px;line-height:1.7;font-weight:500">
+          📌 <strong style="color:var(--guinda)">Toca el mapa</strong> para colocar el marcador &nbsp;·&nbsp;
+          <strong style="color:var(--guinda)">Arrastra el marcador</strong> para una ubicación más precisa &nbsp;·&nbsp;
+          Las coordenadas se actualizan automáticamente
+        </div>
+
+        <!-- Coords manuales (avanzado) -->
+        <details style="margin-bottom:8px">
+          <summary style="font-size:13px;font-weight:600;color:var(--guinda);cursor:pointer;padding:4px 0">Editar coordenadas manualmente</summary>
+          <div class="grid-2" style="margin-top:10px">
+            <div class="campo">
+              <label>Latitud</label>
+              <input id="latitud" type="text" inputmode="decimal" placeholder="Ej. 17.06900"
+                oninput="marcarVerde('latitud');actualizarMapaDesdeInputs('mapa-gps','latitud','longitud')">
+            </div>
+            <div class="campo">
+              <label>Longitud</label>
+              <input id="longitud" type="text" inputmode="decimal" placeholder="Ej. -96.72030"
+                oninput="marcarVerde('longitud');actualizarMapaDesdeInputs('mapa-gps','latitud','longitud')">
+            </div>
+          </div>
+          <button onclick="centrarMapaEnUbicacion('mapa-gps','latitud','longitud')" style="margin-top:8px;background:var(--crema);color:var(--guinda);border:1.5px solid var(--borde);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer">🗺️ Centrar en estas coords</button>
+        </details>
+
+        <!-- linkUbicacion oculto para compatibilidad con sheet -->
+        <input type="hidden" id="linkUbicacion" value="">
+      </div>
+
+      <div class="nav-btns">
+        <button onclick="confirmarSalirSinGuardar()" class="btn-salir-form">🚪 Salir sin guardar</button>
+        <button class="btn-next" onclick="siguiente()">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- ══════════ PASO 2: Tipo de vivienda / Tenencia (FILTROS 1 y 2) ══════════ -->
+    <div class="seccion" id="paso-2">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 2 de 6 — Por llamada</div>
+        <div class="seccion-titulo">Tipo de vivienda y tenencia del predio</div>
+      </div>
+
+      <!-- FILTRO 1: Tipo de vivienda -->
+      <div class="card-campos">
+        <h3>Tipo de vivienda</h3>
+        <div class="campo" id="campo-tipoVivienda">
+          <label>Esta vivienda es</label>
+          <select id="tipoVivienda" onchange="toggleViviendaOtro();chequearCorteVivienda();marcarVerde('tipoVivienda')">
+            <option value="">Seleccionar</option>
+            <option value="Propia">Propia</option>
+            <option value="Rentada">Rentada</option>
+            <option value="Prestada">Prestada</option>
+            <option value="A crédito">A crédito (se encuentra la persona pagándola)</option>
+            <option value="Otro">Otro (especificar)</option>
+          </select>
+        </div>
+        <div class="campo-condicional" id="cond_viviendaOtro">
+          <div class="campo"><label>Especifique</label><input id="tipoViviendaOtro" type="text" placeholder="Tipo de vivienda"></div>
+        </div>
+        <!-- Aviso de corte para Rentada/Prestada/Crédito -->
+        <div id="aviso-corte-vivienda" style="display:none;margin-top:16px;background:#fff8e6;border:2px solid var(--dorado);border-radius:10px;padding:16px 18px">
+          <div style="font-family:'Sora',sans-serif;font-size:13px;font-weight:700;color:#8a6200;margin-bottom:6px">⚠️ La entrevista concluye aquí</div>
+          <div style="font-size:13px;color:var(--texto);line-height:1.6;margin-bottom:14px">La vivienda es <strong id="tipo-vivienda-corte"></strong>. No es posible continuar con el registro. Guarda la información capturada hasta ahora o sal sin guardar.</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button onclick="mostrarModalEnvio(_construirDataActual())" style="padding:11px 22px;background:var(--verde);color:white;border:none;border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer">✅ Guardar lo capturado y salir</button>
+            <button onclick="confirmarSalirSinGuardar()" style="padding:11px 18px;background:white;color:var(--rojo);border:1.5px solid var(--rojo);border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:12px;cursor:pointer">🗑️ Salir sin guardar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILTRO 2: Tenencia del predio -->
+      <div class="card-campos" id="card-corte-bloqueo-1">
+        <h3>Tenencia del predio</h3>
+        <div class="campo">
+          <label>¿Usted es propietario o posesionario del predio donde se realizará la acción de vivienda?</label>
+          <select id="tipoTenenciaPredio" onchange="toggleDocumentoPredio();marcarVerde('tipoTenenciaPredio')">
+            <option value="">Seleccionar</option>
+            <option value="Titular">Titular</option>
+            <option value="Posesionario">Posesionario</option>
+            <option value="No aplica">No aplica</option>
+          </select>
+        </div>
+
+        <!-- Documento que acredita — solo para Titular/Posesionario -->
+        <div class="campo-condicional" id="cond_documentoPredio" style="margin-top:14px">
+          <div class="campo">
+            <label>¿Con qué documento acredita la titularidad o posesión del predio?</label>
+            <select id="documentoPredio" onchange="marcarVerde('documentoPredio')">
+              <option value="">Seleccionar</option>
+              <option value="Escritura pública">Escritura pública</option>
+              <option value="Título de propiedad / escritura pública">Título de propiedad</option>
+              <option value="Constancia de posesión">Constancia de posesión</option>
+              <option value="Constancia de posesión ejidal o comunal">Constancia de posesión ejidal o comunal</option>
+              <option value="Certificado parcelario">Certificado parcelario</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Bloque No Aplica inline -->
+        <div id="bloque-no-aplica" style="display:none;margin-top:16px">
+          <div style="background:#fff3f3;border:1.5px solid var(--rojo);border-radius:10px;padding:16px 18px;margin-bottom:16px">
+            <div style="font-family:'Sora',sans-serif;font-size:13px;font-weight:700;color:var(--rojo);margin-bottom:6px">⛔ No es posible continuar</div>
+            <div style="font-size:13px;color:var(--texto);line-height:1.6">
+              Para registrar una acción de vivienda, el solicitante debe ser <strong>propietario o posesionario</strong> del predio.<br>
+              Si conoces quién sí lo es, captura sus datos para darle seguimiento.
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="campo">
+              <label>Nombre del titular o posesionario</label>
+              <input id="nombreReferidoInline" type="text" placeholder="Nombre completo del titular" oninput="capitalizarCampo(this)">
+            </div>
+            <div class="campo">
+              <label>Teléfono del titular o posesionario</label>
+              <input id="telefonoReferidoInline" type="text" inputmode="numeric" maxlength="10" placeholder="10 dígitos" oninput="soloNumeroEntero(this)">
+            </div>
+          </div>
+          <div id="msg-referido-inline" style="font-size:12px;color:var(--rojo);margin-top:8px;min-height:14px"></div>
+          <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+            <button onclick="guardarReferidoInlineYSalir()" style="padding:11px 24px;background:var(--verde);color:white;border:none;border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer">✅ Guardar referido e iniciar nuevo registro</button>
+            <button onclick="salirSinReferidoInline()" style="padding:11px 20px;background:white;color:var(--texto-soft);border:1.5px solid var(--borde);border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:12px;cursor:pointer">Salir sin guardar</button>
+          </div>
+        </div>
+
+        <!-- Campos ocultos compatibilidad sheet -->
+        <input type="hidden" id="nombreTitular" value="">
+        <input type="hidden" id="telefonoTitular" value="">
+        <input type="hidden" id="documentoPredioLegal" value="">
+        <input type="hidden" id="bloque-doc-legal" value="">
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn-prev" onclick="anterior()">← Anterior</button>
+        <button onclick="confirmarSalirSinGuardar()" class="btn-salir-form">🚪 Salir sin guardar</button>
+        <button class="btn-next" id="btn-siguiente-paso2" onclick="siguiente()">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- ══════════ PASO 3: Condiciones de acceso al predio ══════════ -->
+    <div class="seccion" id="paso-3">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 3 de 6 — Por llamada</div>
+        <div class="seccion-titulo">Condiciones de acceso al predio</div>
+      </div>
+
+      <div class="card-campos">
+        <h3>Acceso al predio</h3>
+        <div class="campo">
+          <label>¿Cómo es el acceso principal al predio o localidad donde se ubica el terreno?</label>
+          <select id="condicionesAcceso" onchange="marcarVerde('condicionesAcceso')">
+            <option value="">Seleccionar</option>
+            <option value="Carretera pavimentada hasta el predio">Carretera pavimentada hasta el predio</option>
+            <option value="Carretera pavimentada hasta la localidad y camino de terracería corto hacia el predio">Carretera pavimentada + terracería corta al predio</option>
+            <option value="Camino de terracería transitable para vehículos de carga">Terracería transitable para vehículos de carga</option>
+            <option value="Camino rural en condiciones irregulares (solo vehículos ligeros)">Camino rural (solo vehículos ligeros)</option>
+            <option value="Acceso únicamente por brecha o camino en mal estado">Brecha o camino en mal estado</option>
+            <option value="Acceso únicamente peatonal">Solo peatonal</option>
+            <option value="Acceso mixto (vehículo + trayecto a pie)">Mixto (vehículo + trayecto a pie)</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn-prev" onclick="anterior()">← Anterior</button>
+        <button onclick="confirmarSalirSinGuardar()" class="btn-salir-form">🚪 Salir sin guardar</button>
+        <button class="btn-next" onclick="siguiente()">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- ══════════ PASO 4: Ocupantes y características del hogar ══════════ -->
+    <div class="seccion" id="paso-4">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 4 de 6 — Por llamada</div>
+        <div class="seccion-titulo">Ocupantes y características del hogar</div>
+      </div>
+
+      <!-- Ocupantes e ingreso -->
+      <div class="card-campos" id="card-corte-bloqueo-2">
+        <h3>Ocupantes y situación económica</h3>
+        <div class="grid-2">
+          <div class="campo" id="campo-personasVivienda">
+            <label>¿Cuántas personas viven en esta vivienda?</label>
+            <input id="personasVivienda" type="text" inputmode="numeric" oninput="soloNumeroEntero(this);marcarVerde('personasVivienda')" placeholder="Número">
+          </div>
+          <div class="campo" id="campo-ingresoMensual">
+            <label>Ingreso mensual ($)</label>
+            <input id="ingresoMensual" type="text" inputmode="numeric" placeholder="0" oninput="soloNumeroEntero(this);marcarVerde('ingresoMensual')">
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top:16px">
+          <div class="campo">
+            <label>Tipo de empleo</label>
+            <select id="tipoEmpleo" onchange="marcarVerde('tipoEmpleo')">
+              <option value="">Seleccionar</option>
+              <option value="Formal">Formal</option>
+              <option value="Informal">Informal</option>
+            </select>
+          </div>
+          <div class="campo" id="campo-personasPrograma">
+            <label>¿Cuántas personas reciben algún programa social?</label>
+            <input id="personasPrograma" type="text" inputmode="numeric" oninput="soloNumeroEntero(this);marcarVerde('personasPrograma')" placeholder="Número">
+          </div>
+        </div>
+      </div>
+
+      <!-- Características del hogar -->
+      <div class="card-campos">
+        <h3>Características del hogar</h3>
+        <div class="grid-2">
+          <div class="campo" id="campo-jefeFamilia">
+            <label>El jefe o jefa de familia presenta</label>
+            <select id="jefeFamilia" onchange="marcarVerde('jefeFamilia')">
+              <option value="">Seleccionar</option>
+              <option value="Madre soltera">Madre soltera</option>
+              <option value="Adulto mayor (65+)">Adulto mayor (65+)</option>
+              <option value="Persona con discapacidad">Persona con discapacidad</option>
+              <option value="Ninguno">Ninguno</option>
+            </select>
+          </div>
+          <div class="campo" id="campo-habitantesCarac">
+            <label>¿Algún habitante presenta alguna de las siguientes características?</label>
+            <select id="habitantesCarac" onchange="marcarVerde('habitantesCarac')">
+              <option value="">Seleccionar</option>
+              <option value="Madre soltera">Madre soltera</option>
+              <option value="Adulto mayor (65+)">Adulto mayor (65+)</option>
+              <option value="Persona con discapacidad">Persona con discapacidad</option>
+              <option value="Ninguno">Ninguno</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn-prev" onclick="anterior()">← Anterior</button>
+        <button onclick="confirmarSalirSinGuardar()" class="btn-salir-form">🚪 Salir sin guardar</button>
+        <button class="btn-next" onclick="siguiente()">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- ══════════ PASO 5: Materiales, Espacio y Servicios ══════════ -->
+    <div class="seccion" id="paso-5">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 5 de 6 — Por llamada</div>
+        <div class="seccion-titulo">Materiales, espacio y servicios</div>
+      </div>
+
+      <!-- Materiales -->
+      <div class="card-campos">
+        <h3>Materiales actuales de la vivienda</h3>
+        <div class="grid-3">
+          <div class="campo" id="campo-materialPiso">
+            <label>¿De qué material es la mayor parte del piso?</label>
+            <select id="materialPiso" onchange="marcarVerde('materialPiso')">
+              <option value="">Seleccionar</option>
+              <option value="Tierra">Tierra</option>
+              <option value="Cemento sin recubrimiento">Cemento sin recubrimiento</option>
+              <option value="Mosaico / madera u otro recubrimiento">Mosaico / madera u otro recubrimiento</option>
+            </select>
+          </div>
+          <div class="campo" id="campo-materialTecho">
+            <label>¿De qué material es la mayor parte del techo?</label>
+            <select id="materialTecho" onchange="marcarVerde('materialTecho')">
+              <option value="">Seleccionar</option>
+              <option value="Material de desecho">Material de desecho</option>
+              <option value="Lámina de cartón">Lámina de cartón</option>
+              <option value="Lámina metálica">Lámina metálica</option>
+              <option value="Lámina de asbesto">Lámina de asbesto</option>
+              <option value="Palma o paja">Palma o paja</option>
+              <option value="Madera o tejamanil">Madera o tejamanil</option>
+              <option value="Terrado con viguería">Terrado con viguería</option>
+              <option value="Teja">Teja</option>
+              <option value="Losa de concreto">Losa de concreto</option>
+              <option value="Lámina de fibrocemento ondulada">Lámina de fibrocemento ondulada</option>
+            </select>
+          </div>
+          <div class="campo" id="campo-materialMuros">
+            <label>¿De qué material son la mayoría de los muros?</label>
+            <select id="materialMuros" onchange="marcarVerde('materialMuros')">
+              <option value="">Seleccionar</option>
+              <option value="Material de desecho">Material de desecho</option>
+              <option value="Lámina de cartón">Lámina de cartón</option>
+              <option value="Lámina metálica o de asbesto">Lámina metálica o de asbesto</option>
+              <option value="Carrizo, bambú o palma">Carrizo, bambú o palma</option>
+              <option value="Embarro o bajareque">Embarro o bajareque</option>
+              <option value="Madera">Madera</option>
+              <option value="Adobe">Adobe</option>
+              <option value="Tabique, ladrillo, block, piedra o concreto">Tabique, ladrillo, block, piedra o concreto</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Espacio y estructura -->
+      <div class="card-campos">
+        <h3>Dormitorios y espacio disponible</h3>
+        <div class="grid-2">
+          <div class="campo" id="campo-numDormitorios">
+            <label>¿Cuántos dormitorios tiene esta vivienda?</label>
+            <input id="numDormitorios" type="text" inputmode="numeric" placeholder="Cantidad" oninput="soloNumeroEntero(this);marcarVerde('numDormitorios')">
+          </div>
+          <div class="campo">
+            <label>¿Cuántos m² de terreno libre tiene disponibles para construcción?</label>
+            <select id="espacioConstruccion" onchange="marcarVerde('espacioConstruccion')">
+              <option value="">Seleccionar</option>
+              <option value="Menos de 30 m2">Menos de 30 m²</option>
+              <option value="Entre 30 y 45 m2">Entre 30 y 45 m²</option>
+              <option value="Entre 46 y 60 m2">Entre 46 y 60 m²</option>
+              <option value="Entre 61 y 80 m2">Entre 61 y 80 m²</option>
+              <option value="Mas de 80 m2">Más de 80 m²</option>
+              <option value="No sabe / requiere verificacion tecnica">No sabe / requiere verificación técnica</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Servicios -->
+      <div class="card-campos">
+        <h3>¿Con cuáles de los siguientes servicios cuenta la vivienda?</h3>
+        <p style="font-size:12px;color:var(--texto-soft);margin-bottom:14px">Selecciona <strong>únicamente los que aplican</strong>. Si no cuenta con ninguno, no selecciones ninguno.</p>
+        <div class="servicios-grid">
+          <div class="servicio-check" id="srv-agua" onclick="toggleServicio('agua')"><span class="check-icon" id="icon-agua"></span> 💧 Agua potable</div>
+          <div class="servicio-check" id="srv-drenaje" onclick="toggleServicio('drenaje')"><span class="check-icon" id="icon-drenaje"></span> 🚿 Drenaje</div>
+          <div class="servicio-check" id="srv-electricidad" onclick="toggleServicio('electricidad')"><span class="check-icon" id="icon-electricidad"></span> ⚡ Electricidad</div>
+          <div class="servicio-check" id="srv-gas" onclick="toggleServicio('gas')"><span class="check-icon" id="icon-gas"></span> 🔥 Gas</div>
+          <div class="servicio-check" id="srv-internet" onclick="toggleServicio('internet')"><span class="check-icon" id="icon-internet"></span> 🌐 Internet</div>
+        </div>
+      </div>
+
+      <!-- Confirmación de llamada -->
+      <div class="card-campos" style="border:2px solid var(--dorado);background:linear-gradient(135deg,#fffdf5,#fff)">
+        <h3 style="color:var(--dorado,#C9A84C)">📞 Confirmación de llamada</h3>
+        <label style="display:flex;align-items:flex-start;gap:14px;cursor:pointer;padding:4px 0">
+          <input type="checkbox" id="llamadaRealizada" style="width:20px;height:20px;cursor:pointer;accent-color:var(--guinda);margin-top:2px;flex-shrink:0">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--texto);line-height:1.4">He actualizado los datos y llamado a esta persona el día de hoy</div>
+            <div style="font-size:12px;color:var(--texto-soft);margin-top:4px">Activa esta casilla para confirmar que la información fue verificada en la llamada de hoy.</div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Resumen -->
+      <div class="card-campos" id="resumen-wrap">
+        <h3>Resumen del registro</h3>
+        <div id="resumen-contenido" style="font-size:14px;line-height:1.8;color:var(--texto-soft)"></div>
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn-prev" onclick="anterior()">← Anterior</button>
+        <div style="display:flex;gap:10px">
+          <button onclick="confirmarSalirSinGuardar()" style="padding:12px 20px;background:white;color:var(--texto-soft);border:1.5px solid var(--borde);border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:12px;cursor:pointer">🚪 Salir sin guardar</button>
+          <button class="btn-guardar" onclick="guardarBeneficiario()" style="background:var(--texto-soft)">💾 Guardar sin territorio</button>
+          <button class="btn-next" onclick="siguiente()">Continuar a territorio →</button>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="seccion" id="paso-6">
+      <div class="seccion-header">
+        <div class="seccion-eyebrow">Paso 6 de 6 — En territorio</div>
+        <div class="seccion-titulo">Información levantada en campo</div>
+      </div>
+
+      <!-- Banner dinámico: cambia según si territorio está activo o no -->
+      <div id="banner-territorio-bloqueado" style="background:#f0faf4;border:1.5px solid var(--verde);border-radius:12px;padding:18px 20px;margin-bottom:20px;font-size:13px;color:var(--verde);line-height:1.6">
+        🔒 <strong>Esta sección se completa en visita territorial.</strong> Los campos están disponibles para consulta pero solo podrán llenarse cuando el administrador active esta sección.
+      </div>
+      <div id="banner-territorio-activo" style="display:none;background:#e6f4ed;border:1.5px solid var(--verde);border-radius:12px;padding:18px 20px;margin-bottom:20px;font-size:13px;color:var(--verde);line-height:1.6">
+        ✅ <strong>Sección de territorio habilitada.</strong> Puedes capturar y guardar los datos de campo.
+      </div>
+
+      <!-- Diversidad e inclusión — bloqueado -->
+      <div class="card-campos card-territorio">
+        <h3>Diversidad e inclusión</h3>
+        <div class="campo">
+          <label>¿Habla usted alguna lengua indígena?</label>
+          <select id="bool-wrap-hablaLengua" class="bool-select" onchange="selBool('hablaLengua',this.value)">
+            <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+          </select>
+        </div>
+        <div class="campo-condicional" id="cond_lenguaIndigena">
+          <div class="campo" style="position:relative">
+            <label>¿Cuál lengua indígena?</label>
+            <input id="lenguaIndigena" type="text" placeholder="Escribe el nombre de la lengua..."
+              autocomplete="off" oninput="filtrarLenguas(this.value)" onblur="cerrarDropdown()">
+            <div id="lenguas-dropdown" style="display:none;position:absolute;z-index:200;background:white;border:1.5px solid var(--guinda);border-radius:0 0 8px 8px;max-height:220px;overflow-y:auto;width:100%;box-shadow:0 8px 20px rgba(0,0,0,0.12);left:0;top:100%"></div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top:16px">
+          <div class="campo">
+            <label>¿Se considera parte de la población indígena?</label>
+            <select id="bool-wrap-poblacionIndigena" class="bool-select" onchange="selBool('poblacionIndigena',this.value)">
+              <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label>¿Se considera usted parte de la población afro mexicana?</label>
+            <select id="bool-wrap-poblacionAfro" class="bool-select" onchange="selBool('poblacionAfro',this.value)">
+              <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+            </select>
+          </div>
+        </div>
+        <div class="campo" style="margin-top:16px">
+          <label>¿Tiene alguna discapacidad?</label>
+          <select id="bool-wrap-tieneDiscapacidad" class="bool-select" onchange="selBool('tieneDiscapacidad',this.value)">
+            <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+          </select>
+        </div>
+        <div class="campo-condicional" id="cond_tipoDiscapacidad">
+          <div class="campo" id="campo-tipoDiscapacidad">
+            <label>Tipo de discapacidad</label>
+            <input id="tipoDiscapacidad" type="text" placeholder="Especifique" oninput="marcarVerde('tipoDiscapacidad')">
+          </div>
+        </div>
+      </div>
+
+      <!-- Condición estructural — bloqueado -->
+      <div class="card-campos card-territorio">
+        <h3>Condición estructural</h3>
+        <div class="campo">
+          <label>¿Cuenta con grietas o daño estructural?</label>
+          <select id="bool-wrap-danoEstructural" class="bool-select" onchange="selBool('danoEstructural',this.value)">
+            <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+          </select>
+        </div>
+        <div class="campo" style="margin-top:16px">
+          <label>¿Ha sufrido daños por causas naturales en los últimos 5 años?</label>
+          <select id="bool-wrap-danoNatural" class="bool-select" onchange="selBool('danoNatural',this.value)">
+            <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Zona de riesgo — solo territorio -->
+      <div class="card-campos card-territorio">
+        <h3>Zona de riesgo</h3>
+        <div class="campo">
+          <label>¿La vivienda se ubica en zona de riesgo?</label>
+          <select id="bool-wrap-zonaRiesgo" class="bool-select" onchange="selBool('zonaRiesgo',this.value)">
+            <option value="">Seleccionar</option><option value="Si">Sí</option><option value="No">No</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Fotos -->
+      <div class="card-campos card-territorio">
+        <h3>📷 Evidencias fotográficas</h3>
+        <p style="font-size:13px;color:var(--texto-soft);margin-bottom:20px;line-height:1.6">Adjunta 3 fotografías de la vivienda: fachada, interior y entorno.</p>
+        <div class="grid-3">
+          <div class="foto-zona" id="zona-fachada" onclick="document.getElementById('input-fachada').click()">
+            <input type="file" id="input-fachada" accept="image/*" capture="environment" style="display:none" onchange="previsualizarFoto('fachada',this)">
+            <div class="foto-preview" id="prev-fachada"><div class="foto-placeholder"><span style="font-size:32px">🏠</span><span class="foto-label">Foto fachada</span><span class="foto-hint">Toca para tomar foto</span></div></div>
+            <div class="foto-estado" id="est-fachada"></div>
+          </div>
+          <div class="foto-zona" id="zona-interior" onclick="document.getElementById('input-interior').click()">
+            <input type="file" id="input-interior" accept="image/*" capture="environment" style="display:none" onchange="previsualizarFoto('interior',this)">
+            <div class="foto-preview" id="prev-interior"><div class="foto-placeholder"><span style="font-size:32px">🛋️</span><span class="foto-label">Foto interior</span><span class="foto-hint">Toca para tomar foto</span></div></div>
+            <div class="foto-estado" id="est-interior"></div>
+          </div>
+          <div class="foto-zona" id="zona-entorno" onclick="document.getElementById('input-entorno').click()">
+            <input type="file" id="input-entorno" accept="image/*" capture="environment" style="display:none" onchange="previsualizarFoto('entorno',this)">
+            <div class="foto-preview" id="prev-entorno"><div class="foto-placeholder"><span style="font-size:32px">🌳</span><span class="foto-label">Foto entorno</span><span class="foto-hint">Toca para tomar foto</span></div></div>
+            <div class="foto-estado" id="est-entorno"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn-prev" onclick="anterior()">← Anterior</button>
+        <button class="btn-guardar" id="btn-guardar-territorio" onclick="guardarBeneficiario()">✅ Guardar registro completo</button>
+      </div>
+
+    </div>
+
+    <!-- ÉXITO -->
+    <div class="exito-wrap" id="exito-wrap">
+      <div class="exito-icon">✅</div>
+      <div class="exito-titulo">¡Registro guardado!</div>
+      <div class="exito-sub">El beneficiario fue registrado correctamente.</div>
+      <div class="exito-id" id="exito-id">#---</div>
+      <button onclick="nuevoRegistro()" style="background:var(--guinda);color:white;border:none;border-radius:8px;padding:14px 36px;font-family:'Sora',sans-serif;font-weight:700;font-size:14px;cursor:pointer;">+ Nuevo registro</button>
+    </div>
+
+    <!-- MODAL ERRORES -->
+    <div class="modal-overlay" id="modal-errores">
+      <div class="modal-box">
+        <div class="modal-titulo">⚠️ Hay campos incompletos</div>
+        <div class="modal-sub">¿Deseas corregirlos o continuar de todas formas?</div>
+        <div class="modal-lista" id="modal-lista-errores"></div>
+        <div class="modal-btns">
+          <button class="modal-btn-cancelar" onclick="cerrarModal()">← Corregir</button>
+          <button class="modal-btn-continuar" onclick="continuarDeTodasFormas()">Continuar →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL CONFIRMAR ENVÍO -->
+    <div class="modal-overlay" id="modal-envio">
+      <div class="modal-box">
+        <div class="modal-titulo">📋 Confirmar envío</div>
+        <div id="modal-envio-contenido"></div>
+        <div class="modal-btns">
+          <button class="modal-btn-cancelar" onclick="cerrarModalEnvio()">← Revisar</button>
+          <button class="modal-btn-continuar" id="btn-confirmar-envio" onclick="if(!_guardandoEnCurso)confirmarEnvio()" style="background:var(--verde)">✅ Sí, enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL SALIR SIN GUARDAR -->
+    <div class="modal-overlay" id="modal-salir">
+      <div class="modal-box">
+        <div class="modal-titulo">⚠️ Tienes información capturada</div>
+        <div class="modal-sub">Si sales ahora, la información que has capturado en este registro se perderá. ¿Qué deseas hacer?</div>
+        <div class="modal-btns" style="flex-direction:column;gap:8px">
+          <button class="modal-btn-continuar" onclick="accionSalir('quedarme')" style="background:var(--guinda);width:100%">← Seguir capturando</button>
+          <button class="modal-btn-continuar" onclick="accionSalirYGuardar()" style="background:var(--verde);width:100%">✅ Guardar registro primero</button>
+          <button onclick="accionSalir('descartar')" style="width:100%;padding:10px;background:white;color:var(--rojo);border:1.5px solid var(--rojo);border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer">🗑️ Salir sin guardar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL NO APLICA PREDIO -->
+    <div class="modal-overlay" id="modal-no-aplica">
+      <div class="modal-box">
+        <div class="modal-titulo" style="color:var(--rojo)">⛔ No es posible continuar</div>
+        <div class="modal-sub" style="line-height:1.7">
+          Para registrar una acción de vivienda, el solicitante debe ser <strong>propietario o posesionario</strong> del predio.<br><br>
+          Si conoces quién sí es el titular o posesionario, captura sus datos para darle seguimiento en un segundo momento.
+        </div>
+        <div style="margin-bottom:20px">
+          <div class="campo" style="margin-bottom:12px">
+            <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--guinda);display:block;margin-bottom:5px">Nombre del titular o posesionario</label>
+            <input id="referido-nombre" type="text" placeholder="Nombre completo del titular"
+              style="width:100%;padding:10px 12px;border:1.5px solid var(--borde);border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;background:var(--crema)"
+              oninput="capitalizarCampo(this)">
+          </div>
+          <div class="campo">
+            <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--guinda);display:block;margin-bottom:5px">Teléfono del titular o posesionario</label>
+            <input id="referido-telefono" type="text" inputmode="numeric" maxlength="10" placeholder="10 dígitos"
+              style="width:100%;padding:10px 12px;border:1.5px solid var(--borde);border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;background:var(--crema)"
+              oninput="soloNumeroEntero(this)">
+          </div>
+        </div>
+        <div id="referido-msg" style="font-size:12px;color:var(--rojo);margin-bottom:12px;min-height:16px"></div>
+        <div class="modal-btns" style="flex-direction:column;gap:8px">
+          <button onclick="guardarReferidoYSalir()" style="width:100%;padding:13px;background:var(--verde);color:white;border:none;border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer">✅ Guardar referido y nuevo registro</button>
+          <button onclick="salirSinReferido()" style="width:100%;padding:11px;background:white;color:var(--texto-soft);border:1.5px solid var(--borde);border-radius:8px;font-family:'Sora',sans-serif;font-weight:700;font-size:12px;cursor:pointer">Salir sin guardar referido</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.cuestionario-wrap -->
+
+  <!-- PANEL REGISTROS -->
+  <div id="panel-registros">
+    <div class="reg-header">
+      <div class="reg-titulo">🗂️ Registros de beneficiarios</div>
+      <div class="reg-buscador">
+        <input id="reg-buscar-input" type="text" placeholder="Buscar por nombre o apellidos…"
+               onkeydown="if(event.key==='Enter') buscarRegistros()"
+               oninput="if(this.value==='') cargarUltimosRegistros()">
+        <button class="btn-buscar" onclick="buscarRegistros()">🔍 Buscar</button>
+        <button class="btn-buscar" onclick="cargarUltimosRegistros()" style="background:var(--texto-soft)" title="Muestra solo el último registro">↻ Último</button>
+        <button class="btn-buscar" onclick="cargarNRegistros(10)" style="background:var(--dorado);color:var(--guinda-dark)" title="Cargar los últimos 10 registros">📋 Últimos 10</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--texto-soft);padding:6px 4px 10px;line-height:1.5">
+      💡 Se muestra el último registro. Usa el buscador para encontrar por nombre o apellidos.
+    </div>
+    <div class="reg-tabla-wrap">
+      <div id="reg-contenido" class="reg-cargando">Cargando registros…</div>
+    </div>
+  </div>
+
+  <!-- Pantalla de edición eliminada — ahora se usa el cuestionario principal -->
+  <div id="pantalla-edicion" style="display:none"></div>
+
+  <!-- ══ PANEL DE CONFIGURACIÓN (solo admin) ══ -->
+  <div id="panel-config" style="display:none;max-width:680px;margin:0 auto;padding:32px 20px 80px">
+
+    <div style="margin-bottom:24px">
+      <div style="font-family:'Sora',sans-serif;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--dorado);margin-bottom:4px">Administración del sistema</div>
+      <div style="font-family:'Sora',sans-serif;font-size:22px;font-weight:800;color:var(--guinda)">⚙️ Configuración</div>
+    </div>
+
+    <!-- Card: Sección Territorio -->
+    <div class="card-campos">
+      <h3>🔒 Sección de Territorio</h3>
+      <p style="font-size:13px;color:var(--texto-soft);margin-bottom:20px;line-height:1.6">
+        Controla si los capturistas pueden ver y llenar la sección de territorio (diversidad, daños, zona de riesgo y fotos). El administrador siempre tiene acceso.
+      </p>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px;background:var(--crema-dark);border-radius:10px;margin-bottom:16px">
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--texto);margin-bottom:3px">Territorio habilitado para capturistas</div>
+          <div style="font-size:12px;color:var(--texto-soft)">Al activar, todos los capturistas podrán llenar la sección de campo en sus registros.</div>
+        </div>
+        <!-- Toggle switch -->
+        <label style="position:relative;display:inline-block;width:52px;height:28px;flex-shrink:0;margin-left:16px;cursor:pointer">
+          <input type="checkbox" id="config-territorio-check" onchange="toggleTerritorioConfig(this.checked)" style="opacity:0;width:0;height:0;position:absolute">
+          <span id="config-territorio-slider" style="position:absolute;inset:0;background:#ccc;border-radius:28px;transition:.3s">
+            <span style="position:absolute;height:22px;width:22px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s;box-shadow:0 2px 4px rgba(0,0,0,.2)" id="config-slider-knob"></span>
+          </span>
+        </label>
+      </div>
+
+      <div id="config-territorio-estado" style="font-size:13px;font-weight:600;padding:10px 14px;border-radius:8px;margin-bottom:16px"></div>
+
+      <button onclick="guardarConfigTerritorioAhora()" style="background:var(--guinda);color:white;border:none;border-radius:8px;padding:12px 28px;font-family:'Sora',sans-serif;font-weight:700;font-size:14px;cursor:pointer" id="btn-guardar-config">
+        💾 Guardar configuración
+      </button>
+    </div>
+
+    <!-- Card: Info de acceso -->
+    <div class="card-campos" style="margin-top:16px">
+      <h3>ℹ️ Estado actual por rol</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px">
+        <div style="background:#e6f4ed;border:1px solid var(--verde);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">👑</div>
+          <div style="font-family:'Sora',sans-serif;font-size:12px;font-weight:700;color:var(--verde)">Administrador</div>
+          <div style="font-size:12px;color:var(--texto-soft);margin-top:4px">Siempre habilitado</div>
+        </div>
+        <div id="config-estado-capturista" style="background:var(--crema-dark);border:1px solid var(--borde);border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">👤</div>
+          <div style="font-family:'Sora',sans-serif;font-size:12px;font-weight:700;color:var(--texto-soft)">Capturistas</div>
+          <div style="font-size:12px;color:var(--texto-soft);margin-top:4px" id="config-cap-estado-txt">Cargando...</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-config -->
+
+</div><!-- /#app-wrap -->
